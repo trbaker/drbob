@@ -1,0 +1,1466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Field Lab — Reading the Land with Elevation Profiles</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Lora:ital,wght@0,400;0,500;0,600;1,400&family=Oswald:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    /* palette pulled from a USGS 7.5-minute quadrangle sheet */
+    --sheet:      #eef1e9;   /* map-margin paper, cool green-gray */
+    --card:       #ffffff;
+    --rule:       #cdd4c6;
+    --ink:        #1e2a2e;
+    --ink-soft:   #5f7078;
+    --contour:    #8a5a2b;   /* printed contour brown */
+    --water:      #2e7d9a;   /* stream blue */
+    --survey:     #c1272d;   /* survey-marker red — the transect */
+    --correct:    #3f7d4e;
+    --missed:     #b8603f;
+    --focus:      #2e7d9a;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; }
+  body{
+    background:var(--sheet); color:var(--ink);
+    font:16px/1.55 "Lora", Georgia, serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  button{ font-family:"Oswald", sans-serif; }
+  :focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
+
+  /* ---------- sheet collar ---------- */
+  .wrap{ max-width:1180px; margin:0 auto; padding:18px 20px 40px; }
+
+  .collar{
+    display:flex; align-items:flex-end; gap:20px; flex-wrap:wrap;
+    border-bottom:2px solid var(--ink); padding-bottom:10px; margin-bottom:4px;
+  }
+  .title-block{ margin-right:auto; }
+  .eyebrow{
+    font:500 11px/1 "Oswald", sans-serif; letter-spacing:.22em;
+    text-transform:uppercase; color:var(--ink-soft); margin-bottom:5px;
+  }
+  h1{
+    margin:0; font:600 30px/1.05 "Oswald", sans-serif;
+    letter-spacing:.03em; text-transform:uppercase;
+  }
+  .quad{
+    font:400 12px/1 "IBM Plex Mono", monospace; color:var(--ink-soft);
+    margin-top:6px;
+  }
+
+  /* progress = a summit profile that gets surveyed as you go */
+  .progress-block{ text-align:right; }
+  .progress-label{
+    font:500 10px/1 "Oswald", sans-serif; letter-spacing:.16em;
+    text-transform:uppercase; color:var(--ink-soft); margin-bottom:6px;
+  }
+  #progSvg{ display:block; }
+
+  /* ---------- layout ---------- */
+  .grid{
+    display:grid; grid-template-columns:minmax(0,1.05fr) minmax(340px,.95fr);
+    gap:22px; margin-top:22px; align-items:start;
+  }
+  @media (max-width:900px){ .grid{ grid-template-columns:1fr; } }
+
+  .panel{
+    background:var(--card); border:1px solid var(--rule); border-radius:3px;
+  }
+  .panel-head{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:9px 14px; border-bottom:1px solid var(--rule);
+  }
+  .panel-head h2{
+    margin:0; font:500 11px/1 "Oswald", sans-serif; letter-spacing:.18em;
+    text-transform:uppercase; color:var(--ink-soft);
+  }
+  .panel-head .meta{ font:400 11px/1 "IBM Plex Mono", monospace; color:var(--ink-soft); }
+
+  /* ---------- map ---------- */
+  #mapWrap{ position:relative; }
+  #mapCanvas{ display:block; width:100%; height:auto; cursor:crosshair; }
+  #mapCanvas.locked{ cursor:default; }
+  .map-tools{
+    display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+    padding:9px 14px; border-top:1px solid var(--rule);
+  }
+  .map-note{
+    font:400 11px/1.4 "IBM Plex Mono", monospace; color:var(--ink-soft); margin-left:auto;
+  }
+
+  /* ---------- profile ---------- */
+  #profileWrap{ position:relative; margin-top:16px; }
+  #profCanvas{ display:block; width:100%; height:auto; cursor:crosshair; }
+  .readout{
+    display:flex; gap:22px; flex-wrap:wrap; padding:9px 14px; border-top:1px solid var(--rule);
+  }
+  .readout .item{ display:flex; flex-direction:column; gap:1px; }
+  .readout .k{
+    font:500 9px/1 "Oswald", sans-serif; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--ink-soft);
+  }
+  .readout .v{ font:500 14px/1.3 "IBM Plex Mono", monospace; }
+  .ve-row{
+    display:flex; align-items:center; gap:10px; padding:9px 14px; border-top:1px solid var(--rule);
+    font:400 12px "IBM Plex Mono", monospace; color:var(--ink-soft);
+  }
+  .ve-row input{ flex:1; accent-color:var(--survey); }
+  .ve-row .val{ color:var(--survey); font-weight:600; min-width:34px; text-align:right; }
+
+  /* ---------- question card ---------- */
+  .qhead{ display:flex; align-items:baseline; gap:12px; margin-bottom:2px; }
+  .qnum{
+    font:600 34px/1 "Oswald", sans-serif; color:var(--survey); letter-spacing:.02em;
+  }
+  .qskill{
+    font:500 10px/1 "Oswald", sans-serif; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--ink-soft); border:1px solid var(--rule); border-radius:2px; padding:4px 7px;
+  }
+  .qbody{ padding:16px 18px 18px; }
+  .prompt{ font-size:17px; margin:12px 0 16px; }
+  .prompt b{ font-weight:600; }
+  .prompt code{
+    font:500 15px "IBM Plex Mono", monospace; background:#f2f4ee;
+    padding:1px 5px; border-radius:2px;
+  }
+
+  .opts{ display:flex; flex-direction:column; gap:8px; }
+  .opt{
+    display:flex; align-items:flex-start; gap:10px; width:100%; text-align:left;
+    background:#fbfcfa; border:1px solid var(--rule); border-radius:3px;
+    padding:11px 13px; cursor:pointer; font:400 15px/1.4 "Lora", serif; color:var(--ink);
+    transition:border-color .12s, background .12s;
+  }
+  .opt:hover:not(:disabled){ border-color:var(--ink-soft); background:#f5f7f2; }
+  .opt .tag{
+    flex:0 0 auto; font:500 12px/1.35 "IBM Plex Mono", monospace; color:var(--ink-soft);
+  }
+  .opt.sel{ border-color:var(--focus); background:#eef6f9; }
+  .opt.right{ border-color:var(--correct); background:#eef5ef; }
+  .opt.right .tag{ color:var(--correct); }
+  .opt.wrong{ border-color:var(--missed); background:#faf0ec; }
+  .opt.wrong .tag{ color:var(--missed); }
+  .opt:disabled{ cursor:default; }
+
+  /* profile-matching options */
+  .match-grid{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .match-grid .opt{ flex-direction:column; gap:6px; padding:8px; }
+  .match-grid canvas{ width:100%; height:auto; display:block; }
+
+  .numrow{ display:flex; align-items:center; gap:10px; }
+  .numrow input{
+    width:130px; padding:10px 12px; border:1px solid var(--rule); border-radius:3px;
+    font:500 17px "IBM Plex Mono", monospace; color:var(--ink); background:#fbfcfa;
+  }
+  .numrow .unit{ font:500 15px "IBM Plex Mono", monospace; color:var(--ink-soft); }
+
+  .btn{
+    border:1px solid var(--ink); background:var(--ink); color:#fff;
+    font:500 12px/1 "Oswald", sans-serif; letter-spacing:.1em; text-transform:uppercase;
+    padding:11px 18px; border-radius:3px; cursor:pointer; transition:opacity .12s;
+  }
+  .btn:hover:not(:disabled){ opacity:.85; }
+  .btn:disabled{ opacity:.35; cursor:default; }
+  .btn.ghost{ background:transparent; color:var(--ink); }
+  .btn.red{ background:var(--survey); border-color:var(--survey); }
+  .btn.sm{ padding:8px 12px; font-size:11px; }
+  .actions{ display:flex; gap:9px; align-items:center; margin-top:18px; flex-wrap:wrap; }
+
+  .feedback{
+    margin-top:16px; padding:13px 15px; border-radius:3px; border-left:4px solid;
+    display:none; font-size:15px;
+  }
+  .feedback.show{ display:block; }
+  .feedback h4{
+    margin:0 0 5px; font:500 11px/1 "Oswald", sans-serif;
+    letter-spacing:.16em; text-transform:uppercase;
+  }
+  .feedback.ok{ background:#eef5ef; border-color:var(--correct); }
+  .feedback.ok h4{ color:var(--correct); }
+  .feedback.no{ background:#faf0ec; border-color:var(--missed); }
+  .feedback.no h4{ color:var(--missed); }
+  .feedback.tip{ background:#eef6f9; border-color:var(--water); }
+  .feedback.tip h4{ color:var(--water); }
+
+  /* ---------- legend strip ---------- */
+  .legend{
+    display:flex; gap:26px; flex-wrap:wrap; align-items:center;
+    margin-top:24px; padding-top:12px; border-top:2px solid var(--ink);
+    font:400 11px/1.4 "IBM Plex Mono", monospace; color:var(--ink-soft);
+  }
+  .legend .sw{ display:inline-block; width:26px; height:9px; vertical-align:middle; margin-right:6px; }
+  .scalebar{ display:flex; align-items:center; gap:7px; }
+  .scalebar .bar{ display:flex; border:1px solid var(--ink); }
+  .scalebar .bar i{ width:26px; height:8px; }
+  .scalebar .bar i:nth-child(odd){ background:var(--ink); }
+
+  /* ---------- report ---------- */
+  #report{ display:none; }
+  .score-hero{ display:flex; align-items:baseline; gap:16px; flex-wrap:wrap; }
+  .score-big{ font:600 72px/1 "Oswald", sans-serif; color:var(--survey); }
+  .score-sub{ font-size:16px; color:var(--ink-soft); max-width:420px; }
+  .skills{ margin-top:26px; display:flex; flex-direction:column; gap:14px; }
+  .skill{ display:grid; grid-template-columns:1fr 62px; gap:12px; align-items:center; }
+  .skill .name{ font:500 12px/1.3 "Oswald", sans-serif; letter-spacing:.1em; text-transform:uppercase; }
+  .skill .track{ height:9px; background:#dfe4da; border-radius:2px; overflow:hidden; margin-top:5px; }
+  .skill .fill{ height:100%; background:var(--correct); border-radius:2px; }
+  .skill .pct{ font:500 14px "IBM Plex Mono", monospace; text-align:right; }
+  .qlist{ margin-top:26px; border-top:1px solid var(--rule); }
+  .qrow{
+    display:flex; gap:12px; align-items:flex-start;
+    padding:11px 0; border-bottom:1px solid var(--rule); font-size:14px;
+  }
+  .qrow .mark{ font:500 14px "IBM Plex Mono", monospace; flex:0 0 44px; }
+  .qrow .mark.ok{ color:var(--correct); }
+  .qrow .mark.no{ color:var(--missed); }
+  .qrow .mark.half{ color:#b58a2b; }
+
+  @media print{
+    .no-print{ display:none !important; }
+    body{ background:#fff; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="collar">
+    <div class="title-block">
+      <div class="eyebrow">Earth Science · Field Lab 04</div>
+      <h1>Reading the Land</h1>
+      <div class="quad">BLACKFOOT RIDGE QUADRANGLE (training sheet) · 6.0 × 6.0 km · contour interval 20 m</div>
+    </div>
+    <div class="progress-block no-print">
+      <div class="progress-label">Survey progress</div>
+      <svg id="progSvg" width="270" height="46" viewBox="0 0 270 46" aria-label="Progress"></svg>
+    </div>
+  </div>
+
+  <!-- ============ ASSESSMENT ============ -->
+  <div class="grid" id="lab">
+
+    <!-- left: the instrument -->
+    <div>
+      <div class="panel" id="mapWrap">
+        <div class="panel-head">
+          <h2>Topographic map</h2>
+          <span class="meta" id="mapMeta">no transect</span>
+        </div>
+        <canvas id="mapCanvas" width="640" height="640"></canvas>
+        <div class="map-tools no-print">
+          <button class="btn ghost sm" id="undoBtn" disabled>Undo point</button>
+          <button class="btn red sm" id="finishBtn" disabled>Finish line</button>
+          <button class="btn ghost sm" id="clearBtn" disabled>Start over</button>
+          <span class="map-note" id="mapNote">Click the map to place points.</span>
+        </div>
+      </div>
+
+      <div class="panel" id="profileWrap">
+        <div class="panel-head">
+          <h2>Elevation profile</h2>
+          <span class="meta" id="profMeta">—</span>
+        </div>
+        <canvas id="profCanvas" width="640" height="260"></canvas>
+        <div class="readout">
+          <div class="item"><span class="k">Length</span><span class="v" id="rLen">—</span></div>
+          <div class="item"><span class="k">Lowest</span><span class="v" id="rMin">—</span></div>
+          <div class="item"><span class="k">Highest</span><span class="v" id="rMax">—</span></div>
+          <div class="item"><span class="k">Relief</span><span class="v" id="rRel">—</span></div>
+          <div class="item"><span class="k">Cursor</span><span class="v" id="rCur" style="color:var(--survey)">—</span></div>
+        </div>
+        <div class="ve-row no-print" id="veRow" style="display:none">
+          <label for="veSlider">Vertical exaggeration</label>
+          <input type="range" id="veSlider" min="1" max="20" step="1" value="8">
+          <span class="val" id="veVal">8×</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- right: the question -->
+    <div class="panel">
+      <div class="qbody">
+        <div class="qhead">
+          <span class="qnum" id="qNum">01</span>
+          <span class="qskill" id="qSkill">Skill</span>
+        </div>
+        <div class="prompt" id="qPrompt"></div>
+        <div id="qAnswer"></div>
+        <div class="actions no-print">
+          <button class="btn" id="checkBtn" disabled>Check answer</button>
+          <button class="btn ghost" id="nextBtn" style="display:none">Next question →</button>
+        </div>
+        <div class="feedback" id="qFeedback"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ REPORT ============ -->
+  <div id="report">
+    <div class="panel" style="padding:28px 30px 32px; margin-top:22px;">
+      <div class="eyebrow">Field report</div>
+      <div class="score-hero" style="margin-top:8px">
+        <div class="score-big" id="scorePct">—</div>
+        <div class="score-sub" id="scoreWord"></div>
+      </div>
+      <div class="skills" id="skillBars"></div>
+      <div class="qlist" id="qList"></div>
+      <div class="actions no-print" style="margin-top:24px">
+        <button class="btn" onclick="window.print()">Print report</button>
+        <button class="btn ghost" id="againBtn">Run the lab again</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span><i class="sw" style="background:linear-gradient(90deg,#6e9a5e,#9db86e,#d9c88c,#c09a64,#a0764c,#e8dccb)"></i>low → high elevation</span>
+    <span><i class="sw" style="background:var(--contour);height:2px"></i>contour lines (20 m)</span>
+    <span><i class="sw" style="background:var(--water);height:3px"></i>Fox Creek</span>
+    <span><i class="sw" style="background:var(--survey);height:3px"></i>transect line</span>
+    <span class="scalebar">
+      <span class="bar"><i></i><i></i><i></i><i></i></span> 2 km
+    </span>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* =====================================================================
+   1. THE TERRAIN
+   A deterministic synthetic quadrangle: two summits joined by a ridge
+   with a saddle, a lower hill, and a creek valley cut across the south.
+   Everything the assessment asks is measured from this surface at run
+   time, so every "correct answer" is computed, never hard-coded.
+   ===================================================================== */
+const KM = 6.0;                 // map is 6 km on a side
+const NG = 240;                 // heightmap grid resolution
+const CI = 20;                  // contour interval, metres
+const HG = new Float32Array(NG * NG);
+
+const gauss = (dx, dy, sx, sy) =>
+  Math.exp(-((dx * dx) / (2 * sx * sx) + (dy * dy) / (2 * sy * sy)));
+
+// Fox Creek: a stream meandering W→E across the lower third of the sheet
+const creekV = u => 0.68 + 0.16 * Math.sin(u * 4.0 + 0.6);
+
+function rawElev(u, v){
+  let e = 210;
+  e += 400 * gauss(u - 0.24, v - 0.26, 0.135, 0.120);  // Eagle Point (high summit)
+  e += 300 * gauss(u - 0.66, v - 0.50, 0.115, 0.105);  // Bell Knob (second summit)
+  e += 110 * gauss(u - 0.45, v - 0.38, 0.160, 0.050);  // ridge joining them — weak and
+                                                       // narrow, so a real saddle survives
+  e += 150 * gauss(u - 0.86, v - 0.78, 0.115, 0.140);  // Cedar Hill
+  e +=  70 * gauss(u - 0.13, v - 0.82, 0.170, 0.120);  // low bench
+  const d = v - creekV(u);                             // Fox Creek trench
+  e -=  95 * Math.exp(-(d * d) / (2 * 0.050 * 0.050));
+  e += 16 * Math.sin(u * 21.7 + 1.1) * Math.cos(v * 18.3 + 0.5);  // texture
+  e +=  8 * Math.sin(u * 39.1 + 2.4) * Math.sin(v * 35.9 + 1.7);
+  return Math.max(120, e);
+}
+
+let ELEV_MIN = Infinity, ELEV_MAX = -Infinity;
+for (let j = 0; j < NG; j++){
+  for (let i = 0; i < NG; i++){
+    const e = rawElev(i / (NG - 1), j / (NG - 1));
+    HG[j * NG + i] = e;
+    if (e < ELEV_MIN) ELEV_MIN = e;
+    if (e > ELEV_MAX) ELEV_MAX = e;
+  }
+}
+
+/** Bilinear elevation lookup. u,v in [0,1]; returns metres. */
+function elevAt(u, v){
+  const x = Math.min(Math.max(u, 0), 1) * (NG - 1);
+  const y = Math.min(Math.max(v, 0), 1) * (NG - 1);
+  const i = Math.min(Math.floor(x), NG - 2), j = Math.min(Math.floor(y), NG - 2);
+  const fx = x - i, fy = y - j;
+  const a = HG[j * NG + i],       b = HG[j * NG + i + 1];
+  const c = HG[(j + 1) * NG + i], d = HG[(j + 1) * NG + i + 1];
+  return a * (1 - fx) * (1 - fy) + b * fx * (1 - fy) + c * (1 - fx) * fy + d * fx * fy;
+}
+
+/** Walk uphill from a seed to find the true local summit. */
+function climb(u0, v0){
+  let u = u0, v = v0, best = elevAt(u, v), step = 0.02;
+  for (let n = 0; n < 500 && step > 0.0008; n++){
+    let moved = false;
+    for (const [du, dv] of [[step,0],[-step,0],[0,step],[0,-step],
+                            [step,step],[-step,-step],[step,-step],[-step,step]]){
+      const e = elevAt(u + du, v + dv);
+      if (e > best){ best = e; u += du; v += dv; moved = true; break; }
+    }
+    if (!moved) step *= 0.6;
+  }
+  return { u, v, e: best };
+}
+
+const EAGLE = climb(0.25, 0.28);
+const BELL  = climb(0.64, 0.46);
+const CEDAR = climb(0.85, 0.76);
+
+// The saddle: lowest point along the ridge crest between the two summits
+const SADDLE = (() => {
+  let best = null;
+  for (let t = 0.18; t <= 0.82; t += 0.005){
+    const u = EAGLE.u + (BELL.u - EAGLE.u) * t;
+    const v = EAGLE.v + (BELL.v - EAGLE.v) * t;
+    const e = elevAt(u, v);
+    if (!best || e < best.e) best = { u, v, e };
+  }
+  return best;
+})();
+
+const LANDMARKS = [
+  { id:"eagle",  label:"Eagle Point",   short:"A", u:EAGLE.u,  v:EAGLE.v,  e:EAGLE.e,  kind:"peak" },
+  { id:"bell",   label:"Bell Knob",     short:"B", u:BELL.u,   v:BELL.v,   e:BELL.e,   kind:"peak" },
+  { id:"saddle", label:"Miller Saddle", short:"C", u:SADDLE.u, v:SADDLE.v, e:SADDLE.e, kind:"saddle" },
+  { id:"cedar",  label:"Cedar Hill",    short:"D", u:CEDAR.u,  v:CEDAR.v,  e:CEDAR.e,  kind:"peak" },
+  { id:"trailP", label:"Trailhead P",   short:"P", u:0.09,     v:0.16,     e:elevAt(0.09,0.16), kind:"trail" },
+  { id:"trailQ", label:"Trailhead Q",   short:"Q", u:0.93,     v:0.30,     e:elevAt(0.93,0.30), kind:"trail" }
+];
+const LM = id => LANDMARKS.find(l => l.id === id);
+
+/* =====================================================================
+   2. TRANSECTS AND PROFILES
+   ===================================================================== */
+const NSAMP = 200;
+
+/** Sample a polyline (array of {u,v}) into a profile. */
+function makeProfile(pts){
+  if (!pts || pts.length < 2) return null;
+  // cumulative length in normalized units
+  const segLen = [], cum = [0];
+  let total = 0;
+  for (let i = 1; i < pts.length; i++){
+    const dx = pts[i].u - pts[i-1].u, dy = pts[i].v - pts[i-1].v;
+    const L = Math.hypot(dx, dy);
+    segLen.push(L); total += L; cum.push(total);
+  }
+  if (total <= 0) return null;
+
+  const s = [];
+  for (let k = 0; k < NSAMP; k++){
+    const t = (k / (NSAMP - 1)) * total;
+    let seg = 0;
+    while (seg < segLen.length - 1 && cum[seg + 1] < t) seg++;
+    const local = segLen[seg] > 0 ? (t - cum[seg]) / segLen[seg] : 0;
+    const u = pts[seg].u + (pts[seg+1].u - pts[seg].u) * local;
+    const v = pts[seg].v + (pts[seg+1].v - pts[seg].v) * local;
+    s.push({ u, v, distKm: t * KM, elev: elevAt(u, v) });
+  }
+
+  let min = Infinity, max = -Infinity, gain = 0, loss = 0;
+  s.forEach((p, i) => {
+    if (p.elev < min) min = p.elev;
+    if (p.elev > max) max = p.elev;
+    if (i > 0){
+      const d = p.elev - s[i-1].elev;
+      if (d > 0) gain += d; else loss -= d;
+    }
+  });
+  const maxIdx = s.findIndex(p => p.elev === max);
+  const minIdx = s.findIndex(p => p.elev === min);
+
+  return {
+    pts, samples: s, lengthKm: total * KM,
+    min, max, relief: max - min, gain, loss,
+    net: s[s.length-1].elev - s[0].elev,
+    maxIdx, minIdx,
+    startElev: s[0].elev, endElev: s[s.length-1].elev
+  };
+}
+
+// The lab's shared "main transect": crosses Eagle Point's shoulder,
+// drops over the ridge, and cuts through the Fox Creek valley.
+const MAIN_PTS = [{u:0.10,v:0.15},{u:0.75,v:0.92}];
+const MAIN = makeProfile(MAIN_PTS);
+
+// Decoy transects used by the map↔profile matching question
+const DECOYS = [
+  [{u:0.05,v:0.55},{u:0.95,v:0.55}],
+  [{u:0.20,v:0.95},{u:0.80,v:0.08}],
+  [{u:0.95,v:0.90},{u:0.10,v:0.40}]
+].map(makeProfile);
+
+/* =====================================================================
+   3. MAP RENDERING — hypsometric tint + hillshade + contour lines
+   ===================================================================== */
+const mapCv = document.getElementById("mapCanvas");
+const mctx  = mapCv.getContext("2d");
+const MS    = 640;                      // map canvas is square, MS x MS
+
+const RAMP = [
+  [125, [110,154, 94]],   // valley green
+  [230, [157,184,110]],
+  [330, [217,200,140]],   // tan
+  [430, [192,154,100]],
+  [540, [160,118, 76]],   // brown
+  [670, [232,220,203]]    // pale summit
+];
+function tint(e){
+  for (let i = 0; i < RAMP.length - 1; i++){
+    const [e0, c0] = RAMP[i], [e1, c1] = RAMP[i+1];
+    if (e <= e1 || i === RAMP.length - 2){
+      const t = Math.min(Math.max((e - e0) / (e1 - e0), 0), 1);
+      return [c0[0]+(c1[0]-c0[0])*t, c0[1]+(c1[1]-c0[1])*t, c0[2]+(c1[2]-c0[2])*t];
+    }
+  }
+  return RAMP[RAMP.length-1][1];
+}
+
+const baseImg = mctx.createImageData(MS, MS);
+(function paintBase(){
+  const cell = (KM * 1000) / MS;              // metres per pixel
+  const az = 315 * Math.PI/180, alt = 45 * Math.PI/180;
+  const zf = 1.6;                             // gentle vertical boost for shading
+  const E = new Float32Array(MS * MS);
+  for (let y = 0; y < MS; y++)
+    for (let x = 0; x < MS; x++)
+      E[y*MS+x] = elevAt(x/(MS-1), y/(MS-1));
+
+  const d = baseImg.data;
+  for (let y = 0; y < MS; y++){
+    for (let x = 0; x < MS; x++){
+      const idx = y*MS + x;
+      const xl = Math.max(x-1,0), xr = Math.min(x+1,MS-1);
+      const yu = Math.max(y-1,0), yd = Math.min(y+1,MS-1);
+      const dzdx = (E[y*MS+xr] - E[y*MS+xl]) / (2*cell);
+      const dzdy = (E[yd*MS+x] - E[yu*MS+x]) / (2*cell);
+      const slope = Math.atan(zf * Math.hypot(dzdx, dzdy));
+      const aspect = Math.atan2(dzdy, -dzdx);
+      let hs = Math.cos(alt)*Math.cos(slope) + Math.sin(alt)*Math.sin(slope)*Math.cos(az - aspect);
+      hs = 0.55 + 0.55 * Math.max(hs, 0);      // keep it light; this is a paper map
+
+      const e = E[idx];
+      let [r, g, b] = tint(e);
+      r *= hs; g *= hs; b *= hs;
+
+      // contour lines: a pixel is on a contour if it changes band vs. right/down
+      const band = Math.floor(e / CI);
+      const bR = Math.floor(E[y*MS+xr] / CI);
+      const bD = Math.floor(E[yd*MS+x] / CI);
+      if (band !== bR || band !== bD){
+        const index = (band + 1) % 5 === 0;    // every 5th line = index contour (100 m)
+        const w = index ? 0.80 : 0.42;         // index contours print heavier
+        r = r*(1-w) + 138*w; g = g*(1-w) + 90*w; b = b*(1-w) + 43*w;
+      }
+
+      const o = idx * 4;
+      d[o] = r; d[o+1] = g; d[o+2] = b; d[o+3] = 255;
+    }
+  }
+})();
+
+let hoverIdx = -1;          // shared cursor index between map and profile
+let liveProfile = null;     // the profile currently on screen
+let userPts = [];           // vertices the student has placed
+let drawEnabled = false;
+let lineLocked = false;     // preset transect the student can't edit
+
+function drawMap(){
+  mctx.putImageData(baseImg, 0, 0);
+
+  // Fox Creek
+  mctx.beginPath();
+  for (let i = 0; i <= 120; i++){
+    const u = i/120, v = creekV(u);
+    i ? mctx.lineTo(u*MS, v*MS) : mctx.moveTo(u*MS, v*MS);
+  }
+  mctx.strokeStyle = "#2e7d9a"; mctx.lineWidth = 2.6; mctx.lineJoin = "round";
+  mctx.stroke();
+  mctx.save();
+  mctx.font = "italic 15px Lora, serif"; mctx.fillStyle = "#22637c";
+  mctx.translate(0.42*MS, creekV(0.42)*MS - 8);
+  mctx.rotate(0.12); mctx.fillText("Fox Creek", 0, 0);
+  mctx.restore();
+
+  // landmarks
+  for (const l of LANDMARKS){
+    const x = l.u*MS, y = l.v*MS;
+    mctx.beginPath();
+    if (l.kind === "peak"){
+      mctx.moveTo(x, y-8); mctx.lineTo(x+7, y+5); mctx.lineTo(x-7, y+5); mctx.closePath();
+      mctx.fillStyle = "#1e2a2e";
+    } else if (l.kind === "saddle"){
+      mctx.arc(x, y, 5, 0, 7); mctx.fillStyle = "#5f7078";
+    } else {
+      mctx.rect(x-5, y-5, 10, 10); mctx.fillStyle = "#fff";
+      mctx.strokeStyle = "#1e2a2e"; mctx.lineWidth = 2;
+    }
+    mctx.fill();
+    if (l.kind === "trail") mctx.stroke();
+
+    mctx.font = "500 13px Oswald, sans-serif";
+    mctx.textAlign = x > MS*0.78 ? "right" : "left";
+    const ox = x > MS*0.78 ? -11 : 11;
+    mctx.lineWidth = 3; mctx.strokeStyle = "rgba(255,255,255,.9)";
+    mctx.strokeText(l.label, x+ox, y+5);
+    mctx.fillStyle = "#1e2a2e";
+    mctx.fillText(l.label, x+ox, y+5);
+    mctx.textAlign = "left";
+  }
+
+  // the transect
+  const pts = liveProfile ? liveProfile.pts : userPts;
+  if (pts.length){
+    mctx.beginPath();
+    pts.forEach((p, i) => i ? mctx.lineTo(p.u*MS, p.v*MS) : mctx.moveTo(p.u*MS, p.v*MS));
+    mctx.strokeStyle = "rgba(255,255,255,.75)"; mctx.lineWidth = 6; mctx.stroke();
+    mctx.strokeStyle = "#c1272d"; mctx.lineWidth = 2.6; mctx.stroke();
+    for (const p of pts){
+      mctx.beginPath(); mctx.arc(p.u*MS, p.v*MS, 4.5, 0, 7);
+      mctx.fillStyle = "#c1272d"; mctx.fill();
+      mctx.strokeStyle = "#fff"; mctx.lineWidth = 1.8; mctx.stroke();
+    }
+  }
+
+  // linked cursor
+  if (liveProfile && hoverIdx >= 0){
+    const p = liveProfile.samples[hoverIdx];
+    mctx.beginPath(); mctx.arc(p.u*MS, p.v*MS, 8, 0, 7);
+    mctx.fillStyle = "#c1272d"; mctx.fill();
+    mctx.strokeStyle = "#fff"; mctx.lineWidth = 3; mctx.stroke();
+  }
+}
+
+/* =====================================================================
+   4. PROFILE RENDERING — ruled like graph paper
+   ===================================================================== */
+const profCv = document.getElementById("profCanvas");
+const pctx = profCv.getContext("2d");
+const PW = 640, PH = 260;
+const PAD = { l: 58, r: 14, t: 16, b: 30 };
+const pw = PW - PAD.l - PAD.r, ph = PH - PAD.t - PAD.b;
+let VE = null;   // null = fit to panel; a number = fixed exaggeration
+
+function profScale(prof){
+  if (VE === null){
+    let lo = prof.min, hi = prof.max;
+    if (hi - lo < 40){ const m = (hi+lo)/2; lo = m - 20; hi = m + 20; }
+    const p = (hi - lo) * 0.14;
+    return { lo: lo - p, hi: hi + p };
+  }
+  // true vertical exaggeration: metres-per-pixel vertically vs. horizontally
+  const mPerPxH = (prof.lengthKm * 1000) / pw;
+  const mPerPxV = mPerPxH / VE;
+  const span = ph * mPerPxV;
+  const mid = (prof.min + prof.max) / 2;
+  return { lo: mid - span/2, hi: mid + span/2 };
+}
+
+function drawProfile(prof){
+  pctx.clearRect(0, 0, PW, PH);
+  if (!prof){
+    pctx.fillStyle = "#8b9a90";
+    pctx.font = "14px 'IBM Plex Mono', monospace";
+    pctx.textAlign = "center";
+    pctx.fillText("Draw a line on the map to build a profile.", PW/2, PH/2);
+    pctx.textAlign = "left";
+    return;
+  }
+  const s = profScale(prof);
+  const X = km => PAD.l + (km / prof.lengthKm) * pw;
+  const Y = e  => PAD.t + (1 - (e - s.lo) / (s.hi - s.lo)) * ph;
+
+  // graph-paper ruling
+  pctx.strokeStyle = "#e4e8de"; pctx.lineWidth = 1;
+  for (let i = 0; i <= 10; i++){
+    const x = PAD.l + (i/10)*pw;
+    pctx.beginPath(); pctx.moveTo(x, PAD.t); pctx.lineTo(x, PAD.t+ph); pctx.stroke();
+  }
+  pctx.font = "10px 'IBM Plex Mono', monospace";
+  pctx.fillStyle = "#5f7078";
+
+  // elevation gridlines on round numbers
+  const span = s.hi - s.lo;
+  const step = span > 700 ? 200 : span > 350 ? 100 : span > 140 ? 50 : 20;
+  pctx.textAlign = "right"; pctx.textBaseline = "middle";
+  for (let e = Math.ceil(s.lo/step)*step; e <= s.hi; e += step){
+    const y = Y(e);
+    pctx.strokeStyle = "#dfe4da";
+    pctx.beginPath(); pctx.moveTo(PAD.l, y); pctx.lineTo(PAD.l+pw, y); pctx.stroke();
+    pctx.fillText(Math.round(e) + " m", PAD.l - 8, y);
+  }
+
+  // distance axis
+  pctx.textAlign = "center"; pctx.textBaseline = "top";
+  const dStep = prof.lengthKm > 6 ? 2 : prof.lengthKm > 2.5 ? 1 : 0.5;
+  for (let d = 0; d <= prof.lengthKm + 1e-6; d += dStep){
+    pctx.fillText(d.toFixed(d % 1 ? 1 : 0) + " km", X(d), PAD.t + ph + 8);
+  }
+
+  // the land
+  pctx.beginPath();
+  pctx.moveTo(X(0), PAD.t + ph);
+  prof.samples.forEach(p => pctx.lineTo(X(p.distKm), Y(p.elev)));
+  pctx.lineTo(X(prof.lengthKm), PAD.t + ph);
+  pctx.closePath();
+  const g = pctx.createLinearGradient(0, PAD.t, 0, PAD.t + ph);
+  g.addColorStop(0, "rgba(193,39,45,.16)");
+  g.addColorStop(1, "rgba(193,39,45,.02)");
+  pctx.fillStyle = g; pctx.fill();
+
+  pctx.beginPath();
+  prof.samples.forEach((p, i) => {
+    const x = X(p.distKm), y = Y(p.elev);
+    i ? pctx.lineTo(x, y) : pctx.moveTo(x, y);
+  });
+  pctx.strokeStyle = "#c1272d"; pctx.lineWidth = 2.2; pctx.lineJoin = "round"; pctx.stroke();
+
+  // axis frame
+  pctx.strokeStyle = "#1e2a2e"; pctx.lineWidth = 1.2;
+  pctx.beginPath();
+  pctx.moveTo(PAD.l, PAD.t); pctx.lineTo(PAD.l, PAD.t+ph); pctx.lineTo(PAD.l+pw, PAD.t+ph);
+  pctx.stroke();
+
+  // linked cursor
+  if (hoverIdx >= 0 && hoverIdx < prof.samples.length){
+    const p = prof.samples[hoverIdx];
+    const x = X(p.distKm), y = Y(p.elev);
+    pctx.setLineDash([4,4]); pctx.strokeStyle = "rgba(193,39,45,.55)"; pctx.lineWidth = 1;
+    pctx.beginPath(); pctx.moveTo(x, PAD.t); pctx.lineTo(x, PAD.t+ph); pctx.stroke();
+    pctx.setLineDash([]);
+    pctx.beginPath(); pctx.arc(x, y, 5, 0, 7);
+    pctx.fillStyle = "#c1272d"; pctx.fill();
+    pctx.strokeStyle = "#fff"; pctx.lineWidth = 2; pctx.stroke();
+  }
+}
+
+/** Small profile thumbnails for the matching question. */
+function drawThumb(cv, prof){
+  const c = cv.getContext("2d"), W = cv.width, H = cv.height, m = 8;
+  c.clearRect(0,0,W,H);
+  c.fillStyle = "#fbfcfa"; c.fillRect(0,0,W,H);
+  const lo = ELEV_MIN - 10, hi = ELEV_MAX + 10;
+  const X = km => m + (km/prof.lengthKm) * (W - 2*m);
+  const Y = e  => m + (1 - (e-lo)/(hi-lo)) * (H - 2*m);
+  c.beginPath();
+  c.moveTo(X(0), H-m);
+  prof.samples.forEach(p => c.lineTo(X(p.distKm), Y(p.elev)));
+  c.lineTo(X(prof.lengthKm), H-m); c.closePath();
+  c.fillStyle = "rgba(193,39,45,.14)"; c.fill();
+  c.beginPath();
+  prof.samples.forEach((p,i) => { const x=X(p.distKm), y=Y(p.elev); i?c.lineTo(x,y):c.moveTo(x,y); });
+  c.strokeStyle = "#c1272d"; c.lineWidth = 1.8; c.stroke();
+  c.strokeStyle = "#cdd4c6"; c.lineWidth = 1;
+  c.beginPath(); c.moveTo(m, H-m); c.lineTo(W-m, H-m); c.stroke();
+}
+
+/* =====================================================================
+   5. INSTRUMENT WIRING (this is the Terrain Profiler, in miniature)
+   ===================================================================== */
+const $ = id => document.getElementById(id);
+const undoBtn = $("undoBtn"), finishBtn = $("finishBtn"), clearBtn = $("clearBtn");
+const mapNote = $("mapNote"), mapMeta = $("mapMeta"), profMeta = $("profMeta");
+
+function mapXY(ev){
+  const r = mapCv.getBoundingClientRect();
+  return { u: (ev.clientX - r.left) / r.width, v: (ev.clientY - r.top) / r.height };
+}
+
+mapCv.addEventListener("click", ev => {
+  if (!drawEnabled || lineLocked) return;
+  const { u, v } = mapXY(ev);
+  if (u < 0 || u > 1 || v < 0 || v > 1) return;
+  userPts.push({ u, v });
+  liveProfile = null;
+  syncTools();
+  drawMap();
+});
+
+// hover the map near the line → move the cursor on the profile
+mapCv.addEventListener("mousemove", ev => {
+  if (!liveProfile) return;
+  const { u, v } = mapXY(ev);
+  let best = -1, bestD = Infinity;
+  liveProfile.samples.forEach((p, i) => {
+    const d = Math.hypot(p.u - u, p.v - v);
+    if (d < bestD){ bestD = d; best = i; }
+  });
+  setHover(bestD < 0.035 ? best : -1);
+});
+mapCv.addEventListener("mouseleave", () => setHover(-1));
+
+// hover the profile → move the marker on the map
+profCv.addEventListener("mousemove", ev => {
+  if (!liveProfile) return;
+  const r = profCv.getBoundingClientRect();
+  const x = ((ev.clientX - r.left) / r.width) * PW;
+  if (x < PAD.l || x > PAD.l + pw){ setHover(-1); return; }
+  const frac = (x - PAD.l) / pw;
+  setHover(Math.round(frac * (NSAMP - 1)));
+});
+profCv.addEventListener("mouseleave", () => setHover(-1));
+
+function setHover(i){
+  if (i === hoverIdx) return;
+  hoverIdx = i;
+  drawMap(); drawProfile(liveProfile);
+  const cur = $("rCur");
+  if (i >= 0 && liveProfile){
+    const p = liveProfile.samples[i];
+    cur.textContent = Math.round(p.elev) + " m @ " + p.distKm.toFixed(2) + " km";
+  } else cur.textContent = "—";
+}
+
+undoBtn.onclick = () => { userPts.pop(); liveProfile = null; syncTools(); drawMap(); drawProfile(null); };
+clearBtn.onclick = () => {
+  userPts = []; liveProfile = null;
+  syncTools(); drawMap(); drawProfile(null); refreshReadout();
+  if (drawEnabled) $("checkBtn").disabled = true;   // nothing to grade any more
+};
+finishBtn.onclick = () => {
+  liveProfile = makeProfile(userPts);
+  syncTools(); drawMap(); drawProfile(liveProfile); refreshReadout();
+  if (liveProfile) onLineFinished();
+};
+
+function syncTools(){
+  const editable = drawEnabled && !lineLocked;
+  undoBtn.disabled = !editable || userPts.length === 0;
+  finishBtn.disabled = !editable || userPts.length < 2 || !!liveProfile;
+  clearBtn.disabled = !editable || (userPts.length === 0 && !liveProfile);
+  mapCv.classList.toggle("locked", !editable);
+  mapMeta.textContent = liveProfile
+    ? liveProfile.pts.length + " points · " + liveProfile.lengthKm.toFixed(2) + " km"
+    : (userPts.length ? userPts.length + " point" + (userPts.length>1?"s":"") + " placed" : "no transect");
+}
+
+function refreshReadout(){
+  const p = liveProfile;
+  $("rLen").textContent = p ? p.lengthKm.toFixed(2) + " km" : "—";
+  $("rMin").textContent = p ? Math.round(p.min) + " m" : "—";
+  $("rMax").textContent = p ? Math.round(p.max) + " m" : "—";
+  $("rRel").textContent = p ? Math.round(p.relief) + " m" : "—";
+  profMeta.textContent = p ? (VE === null ? "scaled to fit" : VE + "× vertical exaggeration") : "—";
+}
+
+$("veSlider").addEventListener("input", e => {
+  VE = +e.target.value;
+  $("veVal").textContent = VE + "×";
+  drawProfile(liveProfile); refreshReadout();
+});
+
+/** Load a preset transect the student can look at but not move. */
+function showTransect(prof, note){
+  userPts = [];
+  liveProfile = prof;
+  lineLocked = true; drawEnabled = false;
+  mapNote.textContent = note || "This transect is fixed for this question.";
+  syncTools(); drawMap(); drawProfile(prof); refreshReadout();
+}
+/** Hand the drawing tools to the student. */
+function enableDrawing(note){
+  userPts = []; liveProfile = null;
+  lineLocked = false; drawEnabled = true;
+  mapNote.textContent = note;
+  syncTools(); drawMap(); drawProfile(null); refreshReadout();
+}
+function clearInstrument(note){
+  userPts = []; liveProfile = null;
+  lineLocked = true; drawEnabled = false;
+  mapNote.textContent = note || "No transect needed for this question.";
+  syncTools(); drawMap(); drawProfile(null); refreshReadout();
+}
+let onLineFinished = () => {};
+
+/* =====================================================================
+   6. THE ASSESSMENT
+   ===================================================================== */
+const SKILLS = {
+  map:     "Reading a topographic map",
+  profile: "Reading an elevation profile",
+  measure: "Measuring the land",
+  tool:    "Using the profiler",
+  apply:   "Applying what you know"
+};
+
+const shuffle = a => a.map(x => [Math.random(), x]).sort((p,q)=>p[0]-q[0]).map(p=>p[1]);
+const round10 = n => Math.round(n/10)*10;
+
+/** Build 4 numeric choices around a true value; returns {options, answer}. */
+function numChoices(trueVal, offsets, unit){
+  const vals = [round10(trueVal), ...offsets.map(o => round10(trueVal + o))];
+  const uniq = [...new Set(vals)];
+  while (uniq.length < 4) uniq.push(round10(trueVal + (uniq.length * 47) + 30));
+  const opts = shuffle(uniq.slice(0,4)).map(v => ({ text: v + " " + unit, val: v }));
+  return { options: opts, answerVal: round10(trueVal) };
+}
+
+const QUESTIONS = [];
+
+/* --- 1 --- */
+QUESTIONS.push({
+  skill: "profile",
+  onSetup: () => showTransect(MAIN, "Study this transect and its profile."),
+  prompt: `An elevation profile is a <b>side view</b> — a slice through the land, as if you cut
+           the hill with a knife and looked at the cut face.<br><br>
+           On the profile below the map, what does the <b>horizontal axis</b> (left to right) show?`,
+  type: "mc",
+  options: [
+    { text: "How far you have travelled along the line you drew", ok: true },
+    { text: "Elevation above sea level" },
+    { text: "The compass direction you are facing" },
+    { text: "How long the hike takes in hours" }
+  ],
+  hint: "Look at the labels along the bottom of the profile. What units are they in?",
+  explain: `The horizontal axis is <b>distance along the transect</b>, measured in kilometres.
+            Elevation goes on the vertical axis. A profile answers "how high am I <i>here</i>,
+            and <i>here</i>, and <i>here</i>" as you walk the line.`
+});
+
+/* --- 2 --- */
+QUESTIONS.push({
+  skill: "map",
+  onSetup: () => clearInstrument("Use the contour lines and colours to compare the landmarks."),
+  prompt: `On this map, <b>brown contour lines</b> connect points of equal elevation, and the colours
+           run from green (low) up through tan and brown to pale (high).<br><br>
+           Which landmark is at the <b>highest</b> elevation?`,
+  type: "mc",
+  build(){
+    const peaks = [LM("eagle"), LM("bell"), LM("cedar"), LM("saddle")];
+    const top = peaks.reduce((a,b) => a.e > b.e ? a : b);
+    this.options = shuffle(peaks.map(p => ({ text: p.label, ok: p === top })));
+    this._top = top;
+  },
+  hint: "Where are the contour lines packed most tightly, and where is the palest colour?",
+  get explain(){
+    const e = LM("eagle"), b = LM("bell"), c = LM("cedar"), s = LM("saddle");
+    return `<b>${e.label}</b> tops out at about <b>${Math.round(e.e)} m</b> — the pale, tightly
+      ringed summit in the northwest. Bell Knob reaches ${Math.round(b.e)} m and Cedar Hill
+      ${Math.round(c.e)} m.<br><br>
+      Miller Saddle (${Math.round(s.e)} m) is the trap: it sits high on the map, but a
+      <b>saddle</b> is a <i>dip</i> — the low pass along the ridge <i>between</i> two peaks. It is
+      lower than both Eagle Point and Bell Knob, the summits it joins. Tightly packed contour
+      rings mean a steep summit; widely spaced ones mean gentle ground.`;
+  }
+});
+
+/* --- 3 --- */
+QUESTIONS.push({
+  skill: "tool",
+  onSetup(){
+    enableDrawing("Click Trailhead P, then click Eagle Point, then press Finish line.");
+    onLineFinished = () => { $("checkBtn").disabled = false; };
+  },
+  prompt: `Time to use the tool yourself. <b>Draw a transect from Trailhead P to the summit of
+           Eagle Point.</b><br><br>
+           Click the map to place a point at each end, then press <b>Finish line</b>. The profile
+           will appear underneath.`,
+  type: "draw",
+  hint: "Trailhead P is the white square in the upper left. Eagle Point is the black triangle.",
+  check(){
+    if (!liveProfile) return { correct:false, why:"Draw a line and press Finish line first." };
+    const a = liveProfile.pts[0], z = liveProfile.pts[liveProfile.pts.length-1];
+    const P = LM("trailP"), E = LM("eagle"), TOL = 0.075;
+    const near = (p, t) => Math.hypot(p.u-t.u, p.v-t.v) < TOL;
+    const fwd  = near(a, P) && near(z, E);
+    const back = near(a, E) && near(z, P);
+    if (fwd || back) return { correct:true };
+    return { correct:false, why:"Your line does not start and end at the two markers. Try again." };
+  },
+  explain: `Nicely surveyed. Your profile climbs steadily from the trailhead to the summit —
+            and the <b>highest point on the profile is the summit itself</b>, because that is
+            where your line ends. Hover along the profile and watch the red dot travel up the
+            map; that link between the graph and the ground is the whole point of the tool.`
+});
+
+/* --- 4 --- */
+QUESTIONS.push({
+  skill: "profile",
+  keepInstrument: true,   // deliberately keeps the line the student drew in Q3
+  prompt: `Look at the profile <b>you just drew</b>. Reading the vertical axis, roughly how high is
+           the <b>highest point</b> on your line?`,
+  type: "mc",
+  build(){
+    const t = liveProfile ? liveProfile.max : LM("eagle").e;
+    const { options, answerVal } = numChoices(t, [-140, +90, -230], "m");
+    this.options = options.map(o => ({ text: o.text, ok: o.val === answerVal }));
+    this._true = t;
+  },
+  hint: "Find the top of the red line, then read straight across to the elevation axis on the left.",
+  get explain(){
+    return `The peak of your profile sits at about <b>${Math.round(this._true)} m</b> — the highest
+      ground your own line crossed. Reading a value off a profile is a two-step move: find the
+      point on the red line, then slide your eye <i>horizontally</i> across to the elevation axis.`;
+  }
+});
+
+/* --- 5 --- */
+QUESTIONS.push({
+  skill: "measure",
+  onSetup: () => showTransect(MAIN, "Use this fixed transect for the next few questions."),
+  prompt: `Here is a longer transect that crosses the whole quadrangle.<br><br>
+           <b>Relief</b> is the difference between the highest and lowest elevation along a line.
+           Using the readout under the profile, what is the relief of this transect?`,
+  type: "num",
+  unit: "m",
+  build(){ this._true = MAIN.relief; this.tol = Math.max(25, MAIN.relief*0.10); },
+  hint: "Relief = highest − lowest. Both numbers are in the readout strip under the profile.",
+  get explain(){
+    return `Highest ≈ <b>${Math.round(MAIN.max)} m</b>, lowest ≈ <b>${Math.round(MAIN.min)} m</b>,
+      so the relief is ${Math.round(MAIN.max)} − ${Math.round(MAIN.min)} =
+      <b>${Math.round(MAIN.relief)} m</b>. Relief tells you how rugged a place is. A prairie might
+      have 10 m of relief across the same distance; a mountain range, 2,000 m.`;
+  }
+});
+
+/* --- 6 --- */
+QUESTIONS.push({
+  skill: "profile",
+  keepInstrument: true,
+  prompt: `Where the transect crosses <b>Fox Creek</b>, the profile dips to its lowest point — a
+           <b>valley</b>.<br><br>
+           <b>Click directly on the profile</b> at the bottom of that valley.`,
+  type: "clickProfile",
+  build(){ this._true = MAIN.samples[MAIN.minIdx].distKm; },
+  hint: "Look for the lowest dip in the red line, then click it. On the map, that is where the red transect crosses the blue creek.",
+  get explain(){
+    const p = MAIN.samples[MAIN.minIdx];
+    return `The valley bottom is about <b>${p.distKm.toFixed(1)} km</b> along the line, at roughly
+      <b>${Math.round(p.elev)} m</b>. On a profile, a <b>valley</b> is a V or U shaped low, a
+      <b>peak</b> is a high point, and a <b>saddle</b> is a dip <i>between</i> two highs that never
+      comes all the way down.`;
+  }
+});
+
+/* --- 7 --- */
+QUESTIONS.push({
+  skill: "map",
+  onSetup: () => showTransect(MAIN, "Match the red line on the map to its profile."),
+  prompt: `A geologist hands you four profiles. Only one of them was made from the <b>red transect
+           drawn on the map</b>.<br><br>
+           Which profile is it?`,
+  type: "match",
+  build(){
+    const set = [MAIN, ...DECOYS];
+    this._order = shuffle(set.map((p, i) => ({ prof:p, ok:i === 0 })));
+  },
+  hint: "Trace the red line on the map. Does it start high or low? How many hills does it cross? Which profile has that same shape?",
+  explain: `The winning clue is the <b>shape sequence</b>. The red transect starts on high ground,
+            climbs over Eagle Point's shoulder, drops a long way into the Fox Creek valley, then
+            rises again onto Cedar Hill. Only one profile tells that story. Matching a map to a
+            profile is one of the most useful things a geologist does.`
+});
+
+/* --- 8 --- */
+QUESTIONS.push({
+  skill: "measure",
+  onSetup: () => showTransect(MAIN, "Read the numbers you need off the profile."),
+  build(){
+    const s = MAIN.samples;
+    this._e1 = s[0].elev;
+    this._e2 = MAIN.max;
+    this._d  = s[MAIN.maxIdx].distKm;
+    this._true = ((this._e2 - this._e1) / (this._d * 1000)) * 100;
+    this.tol = 2.0;
+  },
+  get prompt(){
+    return `<b>Slope</b> (or gradient) tells you how steep a climb is:<br>
+      <code>slope % = (rise ÷ run) × 100</code><br><br>
+      On this transect the line starts at about <b>${Math.round(this._e1)} m</b> and climbs to its
+      high point of <b>${Math.round(this._e2)} m</b> after <b>${this._d.toFixed(2)} km</b> of
+      horizontal distance.<br><br>
+      What is the <b>average slope</b> of that climb, as a percent?`;
+  },
+  type: "num",
+  unit: "%",
+  hint: "Careful with units. The rise is in metres, so the run must be in metres too — 1 km = 1000 m.",
+  get explain(){
+    const rise = this._e2 - this._e1, run = this._d * 1000;
+    return `Rise = ${Math.round(this._e2)} − ${Math.round(this._e1)} = <b>${Math.round(rise)} m</b>.
+      Run = ${this._d.toFixed(2)} km = <b>${Math.round(run)} m</b>.
+      Slope = (${Math.round(rise)} ÷ ${Math.round(run)}) × 100 ≈ <b>${this._true.toFixed(1)}%</b>.
+      For comparison: a wheelchair ramp is about 8%, a steep road is 10%, and a black-diamond ski
+      run is often 40% or more.`;
+  }
+});
+
+/* --- 9 --- */
+QUESTIONS.push({
+  skill: "measure",
+  keepInstrument: true,
+  build(){
+    const gain = MAIN.gain, net = MAIN.net, rel = MAIN.relief;
+    const opts = [
+      { text: `About ${round10(gain)} m — every uphill section added together`, ok:true },
+      { text: `About ${round10(Math.abs(net))} m — the finish elevation minus the start elevation` },
+      { text: `About ${round10(rel)} m — the highest point minus the lowest point` },
+      { text: "0 m — the hiker ends up lower than they started, so there is no climbing" }
+    ];
+    this.options = shuffle(opts);
+  },
+  prompt: `A hiker walks this whole transect. The route goes <b>up and down more than once</b>.<br><br>
+           How much <b>total elevation gain</b> (total climbing) do they do?`,
+  type: "mc",
+  hint: "Gain counts only the uphill parts, and it counts every single one — even the small ones on the way back up out of the creek.",
+  get explain(){
+    return `Total gain ≈ <b>${Math.round(MAIN.gain)} m</b>. That is <i>every</i> uphill stretch
+      added together. It is not the same as the <b>net change</b>
+      (${Math.round(MAIN.net)} m — just finish minus start) and not the same as the <b>relief</b>
+      (${Math.round(MAIN.relief)} m — just highest minus lowest). This is why a "flat" trail loop
+      that returns to the parking lot can still leave your legs burning: net change is zero, but
+      the gain is not.`;
+  }
+});
+
+/* --- 10 --- */
+QUESTIONS.push({
+  skill: "tool",
+  onSetup(){
+    showTransect(MAIN, "Slide the exaggeration control under the profile.");
+    VE = 1; $("veSlider").value = 1; $("veVal").textContent = "1×";
+    $("veRow").style.display = "flex";
+    drawProfile(MAIN); refreshReadout();
+  },
+  prompt: `The profile is now drawn at <b>1× vertical exaggeration</b> — the vertical scale and the
+           horizontal scale are the same, so this is the mountain's <i>true</i> shape.<br><br>
+           It looks almost flat. <b>Slide the control</b> under the profile and watch what happens,
+           then answer: why do mapmakers usually stretch the vertical scale?`,
+  type: "mc",
+  build(){
+    this.options = shuffle([
+      { text: "Because the line is kilometres long but the hills are only hundreds of metres tall, so at true scale the shape is too subtle to read", ok:true },
+      { text: "Because it makes the mountains genuinely taller" },
+      { text: "Because computers cannot draw small numbers accurately" },
+      { text: "Because it is the only way to show elevation on a graph" }
+    ]);
+  },
+  hint: "Compare the two axes. This transect is about 8 km long. How tall is the tallest hill on it?",
+  get explain(){
+    return `At true scale the run (${MAIN.lengthKm.toFixed(1)} km ≈
+      ${Math.round(MAIN.lengthKm*1000)} m) dwarfs the rise (${Math.round(MAIN.relief)} m), so real
+      mountains really are gentle bumps. Exaggerating the vertical scale makes the shape
+      <b>readable</b> — but it is a deliberate distortion, and every honest profile should say what
+      exaggeration it used. If you forget, you will think a gentle hill is a cliff.`;
+  }
+});
+
+/* --- 11 --- */
+QUESTIONS.push({
+  skill: "apply",
+  onSetup(){
+    $("veRow").style.display = "none"; VE = null;
+    clearInstrument("Last one — no map needed.");
+  },
+  prompt: `Your town wants to build a <b>bike trail</b> from Trailhead P to Trailhead Q, and the
+           planners want it to be gentle enough for beginners.<br><br>
+           They ask you to make several elevation profiles first. <b>What is the single most useful
+           thing a profile tells them?</b>`,
+  type: "mc",
+  build(){
+    this.options = shuffle([
+      { text: "How steep each possible route is, so they can pick the one with the gentlest slopes and least climbing", ok:true },
+      { text: "What kind of trees grow along the route" },
+      { text: "How many people will use the trail each year" },
+      { text: "Exactly how long the trail will take to build" }
+    ]);
+  },
+  hint: "Think about what a profile actually measures — and what it cannot possibly know.",
+  explain: `A profile turns a route into <b>numbers you can compare</b>: length, relief, total
+            climbing, and the steepness of every section. Trail planners, road engineers, pipeline
+            crews, hikers, cyclists and geologists all lean on exactly this. It says nothing about
+            trees, budgets, or crowds — a good scientist knows what a tool <i>cannot</i> tell them,
+            too.`
+});
+
+/* =====================================================================
+   7. QUESTION ENGINE
+   ===================================================================== */
+let qi = 0;
+let attempts = 0;
+let selected = null;
+let results = QUESTIONS.map(() => ({ score:0, done:false }));
+
+const qNum = $("qNum"), qSkill = $("qSkill"), qPrompt = $("qPrompt"),
+      qAnswer = $("qAnswer"), qFeedback = $("qFeedback"),
+      checkBtn = $("checkBtn"), nextBtn = $("nextBtn");
+
+function renderQuestion(){
+  const q = QUESTIONS[qi];
+  attempts = 0; selected = null;
+  onLineFinished = () => {};
+
+  if (!q.keepInstrument){
+    $("veRow").style.display = "none";
+    VE = null;                                   // back to fit-the-panel scaling
+    if (q.onSetup) q.onSetup.call(q); else clearInstrument();
+  }
+  if (q.build) q.build();
+
+  qNum.textContent = String(qi + 1).padStart(2, "0");
+  qSkill.textContent = SKILLS[q.skill];
+  qPrompt.innerHTML = q.prompt;
+  qFeedback.className = "feedback";
+  nextBtn.style.display = "none";
+  checkBtn.style.display = "";
+  checkBtn.textContent = "Check answer";
+  checkBtn.disabled = q.type === "draw" ? !liveProfile : true;
+
+  qAnswer.innerHTML = "";
+
+  if (q.type === "mc"){
+    const box = document.createElement("div");
+    box.className = "opts";
+    q.options.forEach((o, i) => {
+      const b = document.createElement("button");
+      b.className = "opt";
+      b.innerHTML = `<span class="tag">${"ABCD"[i]}</span><span>${o.text}</span>`;
+      b.onclick = () => {
+        [...box.children].forEach(c => c.classList.remove("sel"));
+        b.classList.add("sel");
+        selected = i; checkBtn.disabled = false;
+      };
+      box.appendChild(b);
+    });
+    qAnswer.appendChild(box);
+  }
+
+  else if (q.type === "match"){
+    const box = document.createElement("div");
+    box.className = "opts match-grid";
+    q._order.forEach((o, i) => {
+      const b = document.createElement("button");
+      b.className = "opt";
+      b.innerHTML = `<span class="tag">${"ABCD"[i]}</span>`;
+      const cv = document.createElement("canvas");
+      cv.width = 240; cv.height = 96;
+      b.appendChild(cv);
+      b.onclick = () => {
+        [...box.children].forEach(c => c.classList.remove("sel"));
+        b.classList.add("sel");
+        selected = i; checkBtn.disabled = false;
+      };
+      box.appendChild(b);
+      drawThumb(cv, o.prof);
+    });
+    qAnswer.appendChild(box);
+  }
+
+  else if (q.type === "num"){
+    const row = document.createElement("div");
+    row.className = "numrow";
+    const inp = document.createElement("input");
+    inp.type = "number"; inp.inputMode = "decimal"; inp.placeholder = "0";
+    inp.setAttribute("aria-label", "Your answer");
+    inp.oninput = () => {
+      selected = inp.value === "" ? null : parseFloat(inp.value);
+      checkBtn.disabled = selected === null || Number.isNaN(selected);
+    };
+    inp.onkeydown = e => { if (e.key === "Enter" && !checkBtn.disabled) checkBtn.click(); };
+    row.appendChild(inp);
+    const u = document.createElement("span");
+    u.className = "unit"; u.textContent = q.unit;
+    row.appendChild(u);
+    qAnswer.appendChild(row);
+    setTimeout(() => inp.focus(), 40);
+  }
+
+  else if (q.type === "clickProfile"){
+    const note = document.createElement("div");
+    note.style.cssText = "font:400 13px 'IBM Plex Mono',monospace;color:var(--ink-soft)";
+    note.textContent = "Click the profile → your pick appears here.";
+    qAnswer.appendChild(note);
+    profCv.onclick = ev => {
+      const r = profCv.getBoundingClientRect();
+      const x = ((ev.clientX - r.left) / r.width) * PW;
+      if (x < PAD.l || x > PAD.l + pw) return;
+      const km = ((x - PAD.l) / pw) * liveProfile.lengthKm;
+      selected = km;
+      const e = liveProfile.samples[Math.round((km/liveProfile.lengthKm)*(NSAMP-1))].elev;
+      note.textContent = `Your pick: ${km.toFixed(2)} km · ${Math.round(e)} m`;
+      note.style.color = "var(--survey)";
+      checkBtn.disabled = false;
+    };
+  }
+
+  else if (q.type === "draw"){
+    const note = document.createElement("div");
+    note.style.cssText = "font:400 13px 'IBM Plex Mono',monospace;color:var(--ink-soft)";
+    note.textContent = "Place your points on the map, then press Finish line.";
+    qAnswer.appendChild(note);
+    onLineFinished = () => {
+      checkBtn.disabled = false;
+      note.textContent = `Line ready: ${liveProfile.lengthKm.toFixed(2)} km, ` +
+                         `${Math.round(liveProfile.relief)} m of relief.`;
+      note.style.color = "var(--survey)";
+    };
+  }
+
+  drawProgress();
+}
+
+function grade(){
+  const q = QUESTIONS[qi];
+  if (q.type === "mc" || q.type === "match"){
+    const list = q.type === "mc" ? q.options : q._order;
+    return { correct: !!list[selected] && !!list[selected].ok };
+  }
+  if (q.type === "num"){
+    return { correct: Math.abs(selected - q._true) <= q.tol };
+  }
+  if (q.type === "clickProfile"){
+    const tol = liveProfile.lengthKm * 0.08;
+    return { correct: Math.abs(selected - q._true) <= tol };
+  }
+  if (q.type === "draw") return q.check();
+  return { correct:false };
+}
+
+checkBtn.onclick = () => {
+  const q = QUESTIONS[qi];
+  const r = grade();
+  attempts++;
+
+  // paint the choice buttons
+  if (q.type === "mc" || q.type === "match"){
+    const list = q.type === "mc" ? q.options : q._order;
+    const btns = [...qAnswer.querySelectorAll(".opt")];
+    if (r.correct || attempts >= 2){
+      btns.forEach((b, i) => {
+        b.disabled = true;
+        b.classList.remove("sel");
+        if (list[i].ok) b.classList.add("right");
+        else if (i === selected) b.classList.add("wrong");
+      });
+    }
+  }
+
+  if (r.correct){
+    results[qi] = { score: attempts === 1 ? 1 : 0.5, done:true };
+    qFeedback.className = "feedback show ok";
+    qFeedback.innerHTML = `<h4>${attempts === 1 ? "Correct" : "Correct — second try"}</h4>${q.explain}`;
+    finishTurn();
+  } else if (attempts === 1){
+    qFeedback.className = "feedback show tip";
+    qFeedback.innerHTML = `<h4>Not quite — here's a hint</h4>${r.why ? r.why + "<br><br>" : ""}${q.hint}`;
+    if (q.type === "num" || q.type === "clickProfile" || q.type === "draw"){
+      // let them try again with the same input
+      checkBtn.textContent = "Check again";
+    }
+  } else {
+    results[qi] = { score: 0, done:true };
+    qFeedback.className = "feedback show no";
+    qFeedback.innerHTML = `<h4>Let's walk through it</h4>${q.explain}`;
+    finishTurn();
+  }
+  drawProgress();
+};
+
+function finishTurn(){
+  checkBtn.style.display = "none";
+  nextBtn.style.display = "";
+  nextBtn.textContent = qi === QUESTIONS.length - 1 ? "See my field report →" : "Next question →";
+  profCv.onclick = null;
+  if (QUESTIONS[qi].type === "draw"){ drawEnabled = false; syncTools(); }
+  nextBtn.focus();
+}
+
+nextBtn.onclick = () => {
+  if (qi === QUESTIONS.length - 1){ showReport(); return; }
+  qi++;
+  renderQuestion();
+};
+
+/* --- the progress bar is itself an elevation profile --- */
+const PROF_SHAPE = [0.18,0.34,0.26,0.52,0.44,0.70,0.58,0.84,0.70,0.96,0.62,0.40];
+function drawProgress(){
+  const svg = $("progSvg");
+  const W = 270, H = 46, n = QUESTIONS.length;
+  const X = i => (i / n) * W;
+  const Y = h => H - 4 - h * (H - 12);
+  let out = "";
+  for (let i = 0; i < n; i++){
+    const y0 = Y(PROF_SHAPE[i]), y1 = Y(PROF_SHAPE[i+1]);
+    const r = results[i];
+    let fill = "#dfe4da";
+    if (r.done) fill = r.score === 1 ? "#3f7d4e" : r.score === 0.5 ? "#b58a2b" : "#b8603f";
+    const active = i === qi && !r.done;
+    out += `<polygon points="${X(i)},${H-4} ${X(i)},${y0} ${X(i+1)},${y1} ${X(i+1)},${H-4}"
+              fill="${fill}" opacity="${r.done ? 0.9 : active ? 0.45 : 0.35}"/>`;
+  }
+  let pl = "";
+  for (let i = 0; i <= n; i++) pl += `${X(i)},${Y(PROF_SHAPE[i])} `;
+  out += `<polyline points="${pl}" fill="none" stroke="#1e2a2e" stroke-width="1.4"
+            stroke-linejoin="round"/>`;
+  out += `<line x1="0" y1="${H-4}" x2="${W}" y2="${H-4}" stroke="#1e2a2e" stroke-width="1.4"/>`;
+  const done = results.filter(r => r.done).length;
+  out += `<text x="${W}" y="10" text-anchor="end" font-family="IBM Plex Mono, monospace"
+            font-size="10" fill="#5f7078">${done}/${n}</text>`;
+  svg.innerHTML = out;
+}
+
+/* =====================================================================
+   8. FIELD REPORT
+   ===================================================================== */
+function showReport(){
+  $("lab").style.display = "none";
+  $("report").style.display = "block";
+
+  const total = results.reduce((s, r) => s + r.score, 0);
+  const pct = Math.round((total / QUESTIONS.length) * 100);
+  $("scorePct").textContent = pct + "%";
+  $("scoreWord").textContent =
+    pct >= 90 ? "Outstanding. You can read a landscape from a line on a map — that is a real earth-science skill." :
+    pct >= 75 ? "Strong work. You have the core of it; check the skills below for the one to sharpen." :
+    pct >= 55 ? "Good start. Look at which skill scored lowest and run that section again." :
+                "Worth another run. Re-read the explanations, then take the lab again — they build on each other.";
+
+  // per-skill breakdown
+  const bySkill = {};
+  QUESTIONS.forEach((q, i) => {
+    bySkill[q.skill] = bySkill[q.skill] || { got:0, of:0 };
+    bySkill[q.skill].got += results[i].score;
+    bySkill[q.skill].of  += 1;
+  });
+  $("skillBars").innerHTML = Object.keys(SKILLS).filter(k => bySkill[k]).map(k => {
+    const s = bySkill[k], p = Math.round((s.got / s.of) * 100);
+    const col = p >= 75 ? "var(--correct)" : p >= 50 ? "#b58a2b" : "var(--missed)";
+    return `<div class="skill">
+      <div>
+        <div class="name">${SKILLS[k]}</div>
+        <div class="track"><div class="fill" style="width:${p}%;background:${col}"></div></div>
+      </div>
+      <div class="pct">${s.got % 1 ? s.got.toFixed(1) : s.got}/${s.of}</div>
+    </div>`;
+  }).join("");
+
+  // question-by-question
+  $("qList").innerHTML = QUESTIONS.map((q, i) => {
+    const r = results[i];
+    const cls = r.score === 1 ? "ok" : r.score === 0.5 ? "half" : "no";
+    const mark = r.score === 1 ? "✓ 1.0" : r.score === 0.5 ? "◑ 0.5" : "✗ 0.0";
+    const label = q.prompt.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 105);
+    return `<div class="qrow">
+      <span class="mark ${cls}">${mark}</span>
+      <span><b style="font-family:Oswald,sans-serif;font-size:11px;letter-spacing:.1em;
+        text-transform:uppercase;color:var(--ink-soft)">${SKILLS[q.skill]}</b><br>${label}…</span>
+    </div>`;
+  }).join("");
+}
+
+$("againBtn").onclick = () => {
+  qi = 0;
+  results = QUESTIONS.map(() => ({ score:0, done:false }));
+  VE = null;
+  $("veRow").style.display = "none";
+  $("report").style.display = "none";
+  $("lab").style.display = "grid";
+  renderQuestion();
+  window.scrollTo({ top:0, behavior:"smooth" });
+};
+
+/* --- go --- */
+drawMap();
+drawProfile(null);
+renderQuestion();
+</script>
+</body>
+</html>
