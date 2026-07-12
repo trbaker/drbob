@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Trace a Drop — Student Guide</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Bitter:wght@600;800&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+
+<style>
+  :root {
+    --paper:  #F7F5EF;
+    --ink:    #16324F;
+    --stream: #0F6BD7;
+    --basin:  #2E8B6E;
+    --drop:   #00A6C8;
+    --line:   #D8D3C4;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: "IBM Plex Sans", sans-serif; font-size: 17px; line-height: 1.65;
+  }
+  main { max-width: 720px; margin: 0 auto; padding: 32px 22px 60px; }
+
+  h1, h2 { font-family: "Bitter", serif; line-height: 1.2; }
+  h1 { font-size: 34px; font-weight: 800; margin: 10px 0 4px; }
+  .subtitle {
+    font-family: "Bitter", serif; font-weight: 600; font-size: 18px;
+    color: var(--stream); margin: 0 0 24px;
+  }
+  h2 {
+    font-size: 22px; font-weight: 800; margin: 40px 0 10px;
+    padding-top: 18px; border-top: 2px solid var(--line);
+  }
+  strong { color: var(--ink); }
+
+  .droplet { font-size: 40px; line-height: 1; }
+
+  /* map legend */
+  .legend { list-style: none; padding: 0; margin: 14px 0; }
+  .legend li {
+    display: flex; align-items: center; gap: 12px;
+    padding: 7px 0;
+  }
+  .key { flex: none; width: 34px; display: flex; justify-content: center; }
+  .k-drop {
+    width: 14px; height: 14px; border-radius: 50%;
+    background: var(--drop); border: 2px solid #fff;
+    box-shadow: 0 0 0 2px var(--drop);
+  }
+  .k-dash { width: 34px; border-top: 3px dashed var(--drop); }
+  .k-basin {
+    width: 30px; height: 18px; border-radius: 4px;
+    background: rgba(46,139,110,0.25); border: 2.5px solid var(--basin);
+  }
+  .k-path { width: 34px; border-top: 4px solid var(--stream); border-radius: 2px; }
+
+  /* callout boxes */
+  .try {
+    background: #fff; border: 1px solid var(--line); border-left: 5px solid var(--basin);
+    border-radius: 8px; padding: 14px 18px; margin: 14px 0;
+  }
+  .try h3 {
+    font-family: "Bitter", serif; font-size: 17px; font-weight: 800; margin: 0 0 4px;
+  }
+  .try p { margin: 0; }
+
+  .tip {
+    background: #EAF3FB; border: 1px solid #C6DCF0; border-radius: 8px;
+    padding: 12px 18px; margin: 14px 0;
+  }
+
+  ol.steps { padding-left: 0; margin: 16px 0; counter-reset: step; list-style: none; }
+  ol.steps > li {
+    counter-increment: step; position: relative;
+    padding: 0 0 18px 52px;
+  }
+  ol.steps > li::before {
+    content: counter(step); position: absolute; left: 0; top: 0;
+    width: 34px; height: 34px; border-radius: 50%;
+    background: var(--ink); color: var(--paper);
+    font-family: "Bitter", serif; font-weight: 800; font-size: 17px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  ol.steps h3 { font-family: "Bitter", serif; font-size: 18px; margin: 2px 0 4px; }
+  ol.steps p { margin: 0 0 6px; }
+
+  footer {
+    margin-top: 48px; padding-top: 14px; border-top: 2px solid var(--line);
+    font-size: 13px; color: #6b7f93;
+  }
+  a { color: var(--stream); }
+
+  .open-app {
+    display: inline-block; margin: 6px 0 0; padding: 10px 18px;
+    background: var(--ink); color: var(--paper); text-decoration: none;
+    border-radius: 8px; font-weight: 600; font-size: 15px;
+  }
+  .open-app:hover { background: var(--stream); }
+
+  @media print {
+    body { font-size: 12pt; }
+    .open-app { display: none; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <div class="droplet">💧</div>
+  <h1>Trace a Drop</h1>
+  <p class="subtitle">A student's guide to following water from your click to the ocean</p>
+
+  <p>Have you ever wondered where a raindrop goes after it hits the ground? Does it
+  end up in a creek? A big river? The ocean? With <strong>Trace a Drop</strong>, you can
+  find out — by dropping a virtual raindrop anywhere in the continental United States
+  and watching its whole journey.</p>
+
+  <!-- If the app page is named something else, change the link below. -->
+  <a class="open-app" href="watershed-drop.html">Open the app →</a>
+
+  <h2>What is a watershed?</h2>
+  <p>A <strong>watershed</strong> is all the land where water drains to the same place —
+  like a giant funnel made of hills and valleys. If rain falls anywhere inside that
+  funnel, it eventually flows to the same stream, river, or lake.</p>
+  <p>Every spot on land is part of a watershed. Even your school!</p>
+
+  <h2>How to use the app</h2>
+  <ol class="steps">
+    <li>
+      <h3>Click anywhere on the map</h3>
+      <p>Pick a spot in the continental U.S. — near your town, in the mountains,
+      wherever you're curious about. That click is your raindrop.</p>
+    </li>
+    <li>
+      <h3>Watch what appears</h3>
+      <p>The app talks to real scientific data from the U.S. Geological Survey (USGS) —
+      the same data real hydrologists use. In a few seconds you'll see:</p>
+      <ul class="legend">
+        <li><span class="key"><span class="k-drop"></span></span>
+            <span><strong>A cyan dot</strong> — where your drop landed.</span></li>
+        <li><span class="key"><span class="k-dash"></span></span>
+            <span><strong>A dashed cyan line</strong> — your drop sliding downhill over
+            the land until it reaches the nearest stream.</span></li>
+        <li><span class="key"><span class="k-basin"></span></span>
+            <span><strong>A green shaded area</strong> — the watershed: all the land
+            upstream that drains past your drop's stream.</span></li>
+        <li><span class="key"><span class="k-path"></span></span>
+            <span><strong>A bold blue line</strong> — your drop's journey downstream,
+            from stream to river to the ocean. (Sometimes a drop ends at a lake with no
+            outlet, like the Great Salt Lake — not every drop makes it to the sea!)</span></li>
+      </ul>
+    </li>
+    <li>
+      <h3>Hover over the green watershed</h3>
+      <p>A popup tells you the watershed's <strong>name</strong> and its
+      <strong>HUC code</strong>. HUC stands for <em>Hydrologic Unit Code</em> — it's like
+      a ZIP code for watersheds. Scientists use these codes to keep track of every
+      watershed in the country.</p>
+    </li>
+  </ol>
+
+  <h2>Cool things to try</h2>
+
+  <div class="try">
+    <h3>Turn layers on and off</h3>
+    <p>Use the checkboxes in the panel to show or hide the watershed, the downstream
+    path, or the drop point. Turning layers off makes it easier to study one thing at a time.</p>
+  </div>
+
+  <div class="try">
+    <h3>Go 3D!</h3>
+    <p>Click <strong>"View in 3D terrain"</strong> to tilt the map and see actual mountains
+    and valleys. Now you can see <em>why</em> the water flows where it does — water always
+    runs downhill. Click the button again to flip back to the flat 2D map.</p>
+  </div>
+
+  <div class="try">
+    <h3>Be a divide detective</h3>
+    <p>Click on one side of a mountain range, then on the other side just a few miles
+    away. Do the two drops end up in totally different oceans? The invisible line between
+    them is a <strong>drainage divide</strong>. The most famous one, the Continental
+    Divide, runs down the Rocky Mountains.</p>
+  </div>
+
+  <div class="try">
+    <h3>Race to the sea</h3>
+    <p>Which takes a longer path to the ocean: a drop in Montana or a drop in Florida?
+    Try both and compare the blue lines.</p>
+  </div>
+
+  <div class="try">
+    <h3>Find your home watershed</h3>
+    <p>Click near where you live. What's your watershed's name? Where does your
+    water end up?</p>
+  </div>
+
+  <h2>If something doesn't work</h2>
+  <div class="tip"><strong>Nothing happened after clicking?</strong> Make sure you clicked
+  inside the continental United States — the data only covers that area.</div>
+  <div class="tip"><strong>Want to start over?</strong> Click the
+  <strong>"Clear map"</strong> button.</div>
+  <div class="tip"><strong>Map looks stuck?</strong> Wait a moment — the app is asking
+  real USGS computers for data, and sometimes that takes a few seconds.</div>
+
+  <h2>Why this matters</h2>
+  <p>Everything that happens on the land in a watershed — farms, cities, forests,
+  litter — affects the water flowing through it. When you know your watershed, you know
+  whose water you share. Scientists, farmers, and city planners all use maps like this
+  one to keep rivers clean and communities safe.</p>
+  <p>So go ahead — drop a drop, and follow the water. 🌊</p>
+
+  <footer>
+    Data in this app comes from the U.S. Geological Survey's National Hydrography
+    Dataset and Watershed Boundary Dataset. Maps by Esri.
+  </footer>
+</main>
+</body>
+</html>
