@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Terrain Profiler — Interactive Elevation Profile</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://js.arcgis.com/4.29/esri/themes/light/main.css" />
+<script src="https://js.arcgis.com/4.29/"></script>
+
+<style>
+  :root{
+    --ink:        #eef1f4;   /* page background */
+    --panel:      #ffffff;
+    --panel-edge: #d9e0e7;
+    --text:       #22303d;
+    --muted:      #67798a;
+    --amber:      #d9822b;   /* profile line — contour-map ochre */
+    --amber-dim:  rgba(217,130,43,.14);
+    --teal:       #128f77;   /* live cursor */
+    --grid:       rgba(34,48,61,.09);
+    --danger:     #c0564a;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ height:100%; margin:0; }
+  body{
+    display:flex; flex-direction:column;
+    background:var(--ink); color:var(--text);
+    font:14px/1.45 "IBM Plex Sans", system-ui, sans-serif;
+    overflow:hidden;
+  }
+
+  /* ---------- header ---------- */
+  header{
+    display:flex; align-items:center; gap:16px;
+    padding:10px 16px;
+    background:var(--panel); border-bottom:1px solid var(--panel-edge);
+    flex:0 0 auto; flex-wrap:wrap;
+  }
+  .brand{ display:flex; align-items:baseline; gap:10px; margin-right:auto; }
+  .brand h1{
+    margin:0; font-size:15px; font-weight:600; letter-spacing:.04em;
+  }
+  .brand .sub{
+    font:11px/1 "IBM Plex Mono", monospace; color:var(--muted); letter-spacing:.06em;
+  }
+  .btn{
+    appearance:none; border:1px solid var(--panel-edge); border-radius:6px;
+    background:#f4f7f9; color:var(--text);
+    font:500 13px "IBM Plex Sans", sans-serif;
+    padding:7px 14px; cursor:pointer; transition:background .15s, border-color .15s;
+  }
+  .btn:hover{ background:#e9eef2; }
+  .btn:focus-visible{ outline:2px solid var(--amber); outline-offset:2px; }
+  .btn.primary{ background:var(--amber); border-color:var(--amber); color:#fff; }
+  .btn.primary:hover{ background:#c67424; }
+  .btn.drawing{ background:var(--teal); border-color:var(--teal); color:#fff; }
+  .btn:disabled{ opacity:.45; cursor:default; }
+  .units{
+    display:flex; border:1px solid var(--panel-edge); border-radius:6px; overflow:hidden;
+  }
+  .units button{
+    appearance:none; border:0; background:transparent; color:var(--muted);
+    font:500 12px "IBM Plex Mono", monospace; padding:7px 12px; cursor:pointer;
+  }
+  .units button.active{ background:var(--amber-dim); color:var(--amber); }
+  .units button:focus-visible{ outline:2px solid var(--amber); outline-offset:-2px; }
+
+  /* ---------- map ---------- */
+  #viewDiv{ flex:1 1 auto; min-height:200px; position:relative; }
+  .hint{
+    position:absolute; left:50%; top:14px; transform:translateX(-50%);
+    background:rgba(255,255,255,.92); border:1px solid var(--panel-edge);
+    border-radius:6px; padding:8px 14px;
+    font:12px "IBM Plex Mono", monospace; color:var(--teal);
+    box-shadow:0 2px 8px rgba(34,48,61,.12);
+    pointer-events:none; opacity:0; transition:opacity .2s; z-index:5;
+  }
+  .hint.show{ opacity:1; }
+
+  /* ---------- profile panel ---------- */
+  #profilePanel{
+    flex:0 0 248px; background:var(--panel); border-top:1px solid var(--panel-edge);
+    display:flex; flex-direction:column; position:relative;
+  }
+  .stats{
+    display:flex; gap:26px; align-items:center;
+    padding:9px 18px 4px; flex-wrap:wrap;
+  }
+  .stat{ display:flex; flex-direction:column; gap:1px; min-width:70px; }
+  .stat .k{
+    font:10px/1 "IBM Plex Mono", monospace; letter-spacing:.12em;
+    text-transform:uppercase; color:var(--muted);
+  }
+  .stat .v{ font:600 15px/1.3 "IBM Plex Mono", monospace; color:var(--text); }
+  .stat .v.up{ color:var(--teal); }
+  .stat .v.down{ color:var(--danger); }
+  #chartWrap{ flex:1; position:relative; margin:2px 6px 8px; }
+  #chart{ position:absolute; inset:0; width:100%; height:100%; display:block; cursor:crosshair; }
+  #empty{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    color:var(--muted); font:13px "IBM Plex Mono", monospace; text-align:center; padding:0 20px;
+    pointer-events:none;
+  }
+  #tooltip{
+    position:absolute; top:6px; transform:translateX(-50%);
+    background:#fff; border:1px solid var(--panel-edge); border-radius:5px;
+    padding:4px 9px; font:12px "IBM Plex Mono", monospace; color:var(--amber);
+    box-shadow:0 2px 8px rgba(34,48,61,.12);
+    white-space:nowrap; pointer-events:none; display:none; z-index:4;
+  }
+  #tooltip .d{ color:var(--muted); }
+
+  .spinner{
+    position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    background:rgba(255,255,255,.65); font:12px "IBM Plex Mono", monospace; color:var(--teal);
+    z-index:6; letter-spacing:.08em;
+  }
+  .spinner.show{ display:flex; }
+
+  @media (max-width:640px){
+    #profilePanel{ flex-basis:210px; }
+    .stats{ gap:16px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <h1>TERRAIN&nbsp;PROFILER</h1>
+    <span class="sub">3D · WorldElevation/Terrain3D</span>
+  </div>
+  <div class="units" role="group" aria-label="Units">
+    <button id="unitM"  class="active" aria-pressed="true">m / km</button>
+    <button id="unitFt" aria-pressed="false">ft / mi</button>
+  </div>
+  <button id="drawBtn"  class="btn primary">Draw profile line</button>
+  <button id="clearBtn" class="btn" disabled>Clear</button>
+</header>
+
+<div id="viewDiv">
+  <div class="hint" id="hint">click to place vertices · double-click to finish · esc to cancel</div>
+</div>
+
+<div id="profilePanel">
+  <div class="stats">
+    <div class="stat"><span class="k">Length</span><span class="v" id="sLen">—</span></div>
+    <div class="stat"><span class="k">Min elev</span><span class="v" id="sMin">—</span></div>
+    <div class="stat"><span class="k">Max elev</span><span class="v" id="sMax">—</span></div>
+    <div class="stat"><span class="k">Gain</span><span class="v up" id="sGain">—</span></div>
+    <div class="stat"><span class="k">Loss</span><span class="v down" id="sLoss">—</span></div>
+    <div class="stat"><span class="k">Cursor</span><span class="v" id="sCur" style="color:var(--teal)">—</span></div>
+  </div>
+  <div id="chartWrap">
+    <canvas id="chart"></canvas>
+    <div id="tooltip"><span class="e"></span> <span class="d"></span></div>
+    <div id="empty">Draw a line across the terrain to generate its elevation profile.</div>
+  </div>
+  <div class="spinner" id="spinner">SAMPLING TERRAIN…</div>
+</div>
+
+<script>
+require([
+  "esri/Map",
+  "esri/views/SceneView",
+  "esri/layers/GraphicsLayer",
+  "esri/layers/ElevationLayer",
+  "esri/Graphic",
+  "esri/geometry/Polyline",
+  "esri/geometry/Point",
+  "esri/geometry/geometryEngine",
+  "esri/widgets/Sketch/SketchViewModel"
+], (Map, SceneView, GraphicsLayer, ElevationLayer, Graphic,
+    Polyline, Point, geometryEngine, SketchViewModel) => {
+
+  /* ---------------- scene ---------------- */
+  const elevationLayer = new ElevationLayer({
+    url: "https://elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer"
+  });
+
+  const lineLayer   = new GraphicsLayer({ elevationInfo: { mode: "on-the-ground" } });
+  const markerLayer = new GraphicsLayer({ elevationInfo: { mode: "on-the-ground" } });
+
+  const map = new Map({
+    basemap: "satellite",
+    ground: "world-elevation",
+    layers: [lineLayer, markerLayer]
+  });
+
+  const view = new SceneView({
+    container: "viewDiv",
+    map,
+    qualityProfile: "medium",
+    camera: {                       // St. Francois Mountains, MO — Taum Sauk & Johnson's Shut-Ins,
+                                    // the most rugged terrain within reach of St. Louis
+      position: { longitude: -90.75, latitude: 37.43, z: 9500 },
+      heading: 3,
+      tilt: 61
+    },
+    environment: { atmosphereEnabled: true, lighting: { directShadowsEnabled: false } },
+    popupEnabled: false
+  });
+
+  const LINE_SYMBOL = {
+    type: "line-3d",
+    symbolLayers: [{ type: "line", size: 3.4, material: { color: "#f2a64b" },
+                     cap: "round", join: "round" }]
+  };
+  const MARKER_SYMBOL = {
+    type: "point-3d",
+    symbolLayers: [{
+      type: "icon", size: 13,
+      resource: { primitive: "circle" },
+      material: { color: "#14b393" },
+      outline: { color: "#ffffff", size: 1.5 }
+    }]
+  };
+
+  const sketchVM = new SketchViewModel({
+    view,
+    layer: lineLayer,
+    polylineSymbol: LINE_SYMBOL,
+    defaultCreateOptions: { mode: "click" },
+    updateOnGraphicClick: false
+  });
+
+  /* ---------------- dom refs ---------------- */
+  const $ = id => document.getElementById(id);
+  const drawBtn = $("drawBtn"), clearBtn = $("clearBtn"), hint = $("hint"),
+        canvas = $("chart"), wrap = $("chartWrap"), tooltip = $("tooltip"),
+        empty = $("empty"), spinner = $("spinner"),
+        sLen=$("sLen"), sMin=$("sMin"), sMax=$("sMax"),
+        sGain=$("sGain"), sLoss=$("sLoss"), sCur=$("sCur");
+  const ctx = canvas.getContext("2d");
+
+  /* ---------------- state ---------------- */
+  let samples = [];          // { dist(m), elev(m), x, y }  (x,y in view SR)
+  let totalLen = 0, minE = 0, maxE = 0, gain = 0, loss = 0;
+  let hoverIdx = -1;
+  let drawing = false;
+  let metric = true;
+  const markerGraphic = new Graphic({ symbol: MARKER_SYMBOL });
+  let markerShown = false;
+
+  /* ---------------- units ---------------- */
+  const M2FT = 3.28084, M2MI = 1/1609.344;
+  const fmtElev = m => metric
+      ? Math.round(m).toLocaleString() + " m"
+      : Math.round(m * M2FT).toLocaleString() + " ft";
+  const fmtDist = m => metric
+      ? (m >= 1000 ? (m/1000).toFixed(2) + " km" : Math.round(m) + " m")
+      : (m * M2MI >= 0.15 ? (m*M2MI).toFixed(2) + " mi"
+                          : Math.round(m*M2FT).toLocaleString() + " ft");
+
+  /* ---------------- drawing workflow ---------------- */
+  function startDraw(){
+    resetProfile();
+    lineLayer.removeAll();
+    drawing = true;
+    drawBtn.textContent = "Drawing…";
+    drawBtn.classList.remove("primary"); drawBtn.classList.add("drawing");
+    hint.classList.add("show");
+    sketchVM.create("polyline");
+  }
+  function endDrawUI(){
+    drawing = false;
+    drawBtn.textContent = "Redraw line";
+    drawBtn.classList.add("primary"); drawBtn.classList.remove("drawing");
+    hint.classList.remove("show");
+  }
+
+  drawBtn.addEventListener("click", () => { if (!drawing) startDraw(); });
+  clearBtn.addEventListener("click", () => {
+    sketchVM.cancel();
+    lineLayer.removeAll();
+    resetProfile();
+    endDrawUI();
+    drawBtn.textContent = "Draw profile line";
+    clearBtn.disabled = true;
+  });
+  window.addEventListener("keydown", e => {
+    if (e.key === "Escape" && drawing){ sketchVM.cancel(); endDrawUI(); }
+  });
+
+  sketchVM.on("create", ev => {
+    if (ev.state === "complete"){
+      endDrawUI();
+      buildProfile(ev.graphic.geometry);
+    } else if (ev.state === "cancel"){
+      endDrawUI();
+    }
+  });
+
+  /* ---------------- profile sampling ---------------- */
+  async function buildProfile(polyline){
+    try{
+      spinner.classList.add("show");
+      const lenM = geometryEngine.geodesicLength(polyline, "meters");
+      if (!lenM || lenM < 2){ spinner.classList.remove("show"); return; }
+
+      // densify to ~260 samples along the path
+      const maxSeg = Math.max(lenM / 260, 3);
+      const dense = geometryEngine.geodesicDensify(polyline, maxSeg, "meters");
+
+      const result = await elevationLayer.queryElevation(dense, { demResolution: "auto" });
+      const geom = result.geometry;
+
+      // flatten paths → samples with cumulative geodesic distance
+      samples = []; let cum = 0, prev = null, lastElev = 0;
+      for (const path of geom.paths){
+        for (const v of path){
+          const [x, y] = v; let z = v[2];
+          if (z == null || Number.isNaN(z) || z === result.noDataValue) z = lastElev;
+          lastElev = z;
+          if (prev){
+            const seg = new Polyline({
+              paths: [[prev, [x, y]]], spatialReference: geom.spatialReference
+            });
+            cum += geometryEngine.geodesicLength(seg, "meters");
+          }
+          samples.push({ dist: cum, elev: z, x, y });
+          prev = [x, y];
+        }
+      }
+      totalLen = cum;
+
+      // stats
+      minE = Infinity; maxE = -Infinity; gain = 0; loss = 0;
+      for (let i = 0; i < samples.length; i++){
+        const e = samples[i].elev;
+        if (e < minE) minE = e;
+        if (e > maxE) maxE = e;
+        if (i > 0){
+          const d = e - samples[i-1].elev;
+          if (d > 0) gain += d; else loss -= d;
+        }
+      }
+
+      empty.style.display = "none";
+      clearBtn.disabled = false;
+      updateStats();
+      renderChart();
+    } catch(err){
+      console.error(err);
+      empty.style.display = "flex";
+      empty.textContent = "Elevation query failed — check your connection and try again.";
+    } finally {
+      spinner.classList.remove("show");
+    }
+  }
+
+  function resetProfile(){
+    samples = []; hoverIdx = -1; hideMarker();
+    empty.style.display = "flex";
+    empty.textContent = "Draw a line across the terrain to generate its elevation profile.";
+    tooltip.style.display = "none";
+    [sLen,sMin,sMax,sGain,sLoss,sCur].forEach(el => el.textContent = "—");
+    renderChart();
+  }
+
+  function updateStats(){
+    if (!samples.length) return;
+    sLen.textContent  = fmtDist(totalLen);
+    sMin.textContent  = fmtElev(minE);
+    sMax.textContent  = fmtElev(maxE);
+    sGain.textContent = "+" + fmtElev(gain);
+    sLoss.textContent = "−" + fmtElev(loss);
+  }
+
+  /* ---------------- chart ---------------- */
+  const PAD = { l: 62, r: 16, t: 16, b: 26 };
+  let plotW = 0, plotH = 0, cssW = 0, cssH = 0;
+
+  function sizeCanvas(){
+    const r = wrap.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    cssW = r.width; cssH = r.height;
+    canvas.width  = Math.max(1, Math.round(cssW * dpr));
+    canvas.height = Math.max(1, Math.round(cssH * dpr));
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    plotW = cssW - PAD.l - PAD.r;
+    plotH = cssH - PAD.t - PAD.b;
+  }
+
+  const xOf = d => PAD.l + (totalLen ? d / totalLen : 0) * plotW;
+  function yScale(){
+    let lo = minE, hi = maxE;
+    if (hi - lo < 10){ hi += 5; lo -= 5; }
+    const padEl = (hi - lo) * 0.12;
+    return { lo: lo - padEl, hi: hi + padEl };
+  }
+  const yOf = (e, s) => PAD.t + (1 - (e - s.lo) / (s.hi - s.lo)) * plotH;
+
+  function niceTicks(lo, hi, n){
+    const span = hi - lo, raw = span / n, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    const norm = raw / mag;
+    const step = (norm < 1.5 ? 1 : norm < 3 ? 2 : norm < 7 ? 5 : 10) * mag;
+    const ticks = [];
+    for (let t = Math.ceil(lo/step)*step; t <= hi + 1e-9; t += step) ticks.push(t);
+    return ticks;
+  }
+
+  function renderChart(){
+    sizeCanvas();
+    ctx.clearRect(0, 0, cssW, cssH);
+    if (samples.length < 2) return;
+
+    const s = yScale();
+    const css = getComputedStyle(document.documentElement);
+    const AMBER = css.getPropertyValue("--amber").trim();
+    const TEAL  = css.getPropertyValue("--teal").trim();
+    const MUTED = css.getPropertyValue("--muted").trim();
+    const GRID  = css.getPropertyValue("--grid").trim();
+
+    ctx.font = "10px 'IBM Plex Mono', monospace";
+
+    // horizontal graticule + elevation labels
+    const eTicks = niceTicks(s.lo, s.hi, 4);
+    ctx.strokeStyle = GRID; ctx.fillStyle = MUTED;
+    ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    for (const t of eTicks){
+      const y = yOf(t, s);
+      ctx.beginPath(); ctx.moveTo(PAD.l, y); ctx.lineTo(PAD.l + plotW, y); ctx.stroke();
+      const lab = metric ? Math.round(t).toLocaleString() + " m"
+                         : Math.round(t * M2FT).toLocaleString() + " ft";
+      ctx.fillText(lab, PAD.l - 8, y);
+    }
+
+    // distance ticks
+    ctx.textAlign = "center"; ctx.textBaseline = "top";
+    const dTicks = niceTicks(0, totalLen, 6);
+    for (const t of dTicks){
+      const x = xOf(t);
+      ctx.fillText(fmtDist(t), x, PAD.t + plotH + 7);
+      ctx.beginPath(); ctx.moveTo(x, PAD.t + plotH); ctx.lineTo(x, PAD.t + plotH + 4);
+      ctx.strokeStyle = MUTED; ctx.stroke(); ctx.strokeStyle = GRID;
+    }
+
+    // area fill
+    const grad = ctx.createLinearGradient(0, PAD.t, 0, PAD.t + plotH);
+    grad.addColorStop(0, "rgba(217,130,43,.24)");
+    grad.addColorStop(1, "rgba(217,130,43,.02)");
+    ctx.beginPath();
+    ctx.moveTo(xOf(samples[0].dist), PAD.t + plotH);
+    for (const p of samples) ctx.lineTo(xOf(p.dist), yOf(p.elev, s));
+    ctx.lineTo(xOf(samples[samples.length-1].dist), PAD.t + plotH);
+    ctx.closePath(); ctx.fillStyle = grad; ctx.fill();
+
+    // profile line
+    ctx.beginPath();
+    samples.forEach((p, i) => {
+      const x = xOf(p.dist), y = yOf(p.elev, s);
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    });
+    ctx.strokeStyle = AMBER; ctx.lineWidth = 2; ctx.lineJoin = "round"; ctx.stroke();
+
+    // hover crosshair
+    if (hoverIdx >= 0 && hoverIdx < samples.length){
+      const p = samples[hoverIdx];
+      const x = xOf(p.dist), y = yOf(p.elev, s);
+      ctx.strokeStyle = "rgba(18,143,119,.55)"; ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath(); ctx.moveTo(x, PAD.t); ctx.lineTo(x, PAD.t + plotH); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath(); ctx.arc(x, y, 4.5, 0, Math.PI * 2);
+      ctx.fillStyle = TEAL; ctx.fill();
+      ctx.lineWidth = 1.5; ctx.strokeStyle = "#ffffff"; ctx.stroke();
+    }
+  }
+
+  /* ---------------- hover sync ---------------- */
+  function nearestByDist(d){
+    let lo = 0, hi = samples.length - 1;               // binary search on cum dist
+    while (hi - lo > 1){
+      const mid = (lo + hi) >> 1;
+      (samples[mid].dist < d) ? lo = mid : hi = mid;
+    }
+    return (d - samples[lo].dist < samples[hi].dist - d) ? lo : hi;
+  }
+
+  function setHover(i, fromMap){
+    hoverIdx = i;
+    renderChart();
+    if (i < 0){
+      tooltip.style.display = "none";
+      sCur.textContent = "—";
+      hideMarker();
+      return;
+    }
+    const p = samples[i];
+    // tooltip
+    tooltip.querySelector(".e").textContent = fmtElev(p.elev);
+    tooltip.querySelector(".d").textContent = "@ " + fmtDist(p.dist);
+    const tx = Math.min(Math.max(xOf(p.dist), 60), cssW - 60);
+    tooltip.style.left = tx + "px";
+    tooltip.style.display = "block";
+    sCur.textContent = fmtElev(p.elev);
+    // map marker
+    markerGraphic.geometry = new Point({
+      x: p.x, y: p.y, spatialReference: view.spatialReference
+    });
+    if (!markerShown){ markerLayer.add(markerGraphic); markerShown = true; }
+  }
+  function hideMarker(){
+    if (markerShown){ markerLayer.remove(markerGraphic); markerShown = false; }
+  }
+
+  // chart → map
+  canvas.addEventListener("mousemove", e => {
+    if (samples.length < 2) return;
+    const r = canvas.getBoundingClientRect();
+    const x = e.clientX - r.left;
+    if (x < PAD.l || x > PAD.l + plotW){ setHover(-1); return; }
+    const d = (x - PAD.l) / plotW * totalLen;
+    setHover(nearestByDist(d));
+  });
+  canvas.addEventListener("mouseleave", () => setHover(-1));
+
+  // map → chart : hover the drawn line to light up the profile
+  let rafPending = false;
+  view.on("pointer-move", ev => {
+    if (samples.length < 2 || drawing || rafPending) return;
+    rafPending = true;
+    requestAnimationFrame(() => {
+      rafPending = false;
+      const mp = view.toMap({ x: ev.x, y: ev.y });
+      if (!mp){ setHover(-1); return; }
+      // nearest sample in map space
+      let best = -1, bestSq = Infinity;
+      for (let i = 0; i < samples.length; i++){
+        const dx = samples[i].x - mp.x, dy = samples[i].y - mp.y;
+        const sq = dx*dx + dy*dy;
+        if (sq < bestSq){ bestSq = sq; best = i; }
+      }
+      if (best < 0){ setHover(-1); return; }
+      // accept only if the sample is within 14 screen px of the cursor
+      const sp = view.toScreen(new Point({
+        x: samples[best].x, y: samples[best].y, z: samples[best].elev,
+        spatialReference: view.spatialReference
+      }));
+      if (!sp){ setHover(-1); return; }
+      const px = sp.x - ev.x, py = sp.y - ev.y;
+      (px*px + py*py <= 14*14) ? setHover(best, true) : setHover(-1);
+    });
+  });
+
+  /* ---------------- units & resize ---------------- */
+  function setUnits(m){
+    metric = m;
+    $("unitM").classList.toggle("active", m);
+    $("unitFt").classList.toggle("active", !m);
+    $("unitM").setAttribute("aria-pressed", m);
+    $("unitFt").setAttribute("aria-pressed", !m);
+    updateStats(); renderChart();
+    if (hoverIdx >= 0) setHover(hoverIdx);
+  }
+  $("unitM").addEventListener("click", () => setUnits(true));
+  $("unitFt").addEventListener("click", () => setUnits(false));
+
+  new ResizeObserver(() => renderChart()).observe(wrap);
+  renderChart();
+});
+</script>
+</body>
+</html>
