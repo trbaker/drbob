@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Trace a Drop — Watershed &amp; Downstream Tracer</title>
+
+<!-- ArcGIS Maps SDK for JavaScript -->
+<link rel="stylesheet" href="https://js.arcgis.com/4.29/esri/themes/light/main.css" />
+<script src="https://js.arcgis.com/4.29/"></script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Bitter:wght@600;800&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+
+<style>
+  :root {
+    --paper:   #F7F5EF;
+    --ink:     #16324F;
+    --stream:  #0F6BD7;
+    --basin:   #2E8B6E;
+    --drop:    #00A6C8;
+    --line:    #D8D3C4;
+  }
+  html, body { margin: 0; height: 100%; font-family: "IBM Plex Sans", sans-serif; }
+  #viewDiv { position: absolute; inset: 0; }
+
+  /* ---------- control card ---------- */
+  #panel {
+    position: absolute; top: 14px; left: 14px; z-index: 50;
+    width: min(330px, calc(100vw - 28px));
+    background: var(--paper); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: 0 6px 24px rgba(22, 50, 79, 0.22);
+    overflow: hidden;
+  }
+  #panel header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  #panel header svg { flex: none; }
+  #panel h1 {
+    font-family: "Bitter", serif; font-weight: 800;
+    font-size: 18px; line-height: 1.15; margin: 0;
+  }
+  #panel h1 span { color: var(--stream); }
+  .body { padding: 12px 16px 14px; }
+  .hint { font-size: 13px; line-height: 1.45; margin: 0 0 10px; color: #3d5570; }
+
+  fieldset {
+    border: 1px solid var(--line); border-radius: 8px;
+    margin: 0 0 10px; padding: 8px 12px 10px;
+  }
+  legend {
+    font-family: "Bitter", serif; font-weight: 600; font-size: 12px;
+    letter-spacing: 0.06em; text-transform: uppercase; padding: 0 6px;
+  }
+  .layer-row { display: flex; align-items: center; gap: 9px; padding: 5px 0; font-size: 14px; }
+  .layer-row input { width: 16px; height: 16px; accent-color: var(--stream); cursor: pointer; }
+  .swatch { width: 18px; height: 12px; border-radius: 3px; flex: none; }
+  .sw-basin { background: rgba(46,139,110,0.35); border: 2px solid var(--basin); }
+  .sw-path  { background: transparent; border-top: 3px solid var(--stream); height: 0; }
+  .sw-drop  { background: var(--drop); border-radius: 50%; width: 12px; height: 12px; border: 2px solid #fff; box-shadow: 0 0 0 1px var(--drop); }
+
+  .buttons { display: flex; gap: 8px; }
+  button {
+    flex: 1; font: 600 13px "IBM Plex Sans", sans-serif;
+    padding: 8px 10px; border-radius: 7px; cursor: pointer;
+    border: 1px solid var(--ink); background: var(--ink); color: var(--paper);
+    transition: transform 0.06s ease;
+  }
+  button:active { transform: translateY(1px); }
+  button.secondary { background: transparent; color: var(--ink); }
+  button:focus-visible { outline: 3px solid var(--drop); outline-offset: 1px; }
+
+  #status {
+    margin-top: 10px; font-size: 13px; min-height: 18px;
+    display: flex; align-items: center; gap: 8px; color: #3d5570;
+  }
+  #status.error { color: #A33A2C; }
+  .spinner {
+    width: 14px; height: 14px; flex: none; border-radius: 50%;
+    border: 2px solid var(--line); border-top-color: var(--stream);
+    animation: spin 0.8s linear infinite; display: none;
+  }
+  #status.busy .spinner { display: block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2s; } }
+
+  .credit {
+    font-size: 11px; color: #6b7f93; padding: 8px 16px 10px;
+    border-top: 1px solid var(--line);
+  }
+
+  /* ---------- hover tooltip for the watershed ---------- */
+  #tooltip {
+    position: absolute; z-index: 60; display: none;
+    pointer-events: none; max-width: 260px;
+    background: var(--ink); color: var(--paper);
+    padding: 9px 12px; border-radius: 7px;
+    font-size: 12.5px; line-height: 1.5;
+    box-shadow: 0 4px 14px rgba(22, 50, 79, 0.35);
+  }
+  #tooltip .t-title {
+    font-family: "Bitter", serif; font-weight: 600; font-size: 13.5px;
+    margin-bottom: 2px;
+  }
+  #tooltip .t-huc { color: #9FC9EE; font-variant-numeric: tabular-nums; }
+  #tooltip .t-dim { color: #B9C6D4; }
+</style>
+</head>
+<body>
+
+<div id="viewDiv"></div>
+<div id="tooltip" role="tooltip"></div>
+
+<div id="panel">
+  <header>
+    <svg width="26" height="30" viewBox="0 0 26 30" aria-hidden="true">
+      <path d="M13 1 C13 1 3 13.5 3 19.5 a10 10 0 0 0 20 0 C23 13.5 13 1 13 1 Z"
+            fill="#00A6C8" stroke="#16324F" stroke-width="1.6"/>
+      <path d="M8.5 20 a4.5 4.5 0 0 0 4.5 4.5" fill="none" stroke="#F7F5EF"
+            stroke-width="1.6" stroke-linecap="round"/>
+    </svg>
+    <h1>Trace a Drop<br /><span>watershed &amp; downstream tracer</span></h1>
+  </header>
+
+  <div class="body">
+    <p class="hint">Click anywhere in the continental United States. The drop is
+    routed overland to the nearest stream, its upstream watershed is outlined,
+    and its journey is traced downriver to the sea.</p>
+
+    <fieldset>
+      <legend>Layers</legend>
+      <label class="layer-row"><input type="checkbox" id="cbBasin" checked />
+        <span class="swatch sw-basin"></span> Highlighted watershed</label>
+      <label class="layer-row"><input type="checkbox" id="cbPath" checked />
+        <span class="swatch sw-path"></span> Path downstream</label>
+      <label class="layer-row"><input type="checkbox" id="cbDrop" checked />
+        <span class="swatch sw-drop"></span> Drop point</label>
+    </fieldset>
+
+    <div class="buttons">
+      <button id="btnDim" type="button" aria-pressed="false">View in 3D terrain</button>
+      <button id="btnClear" type="button" class="secondary">Clear map</button>
+    </div>
+
+    <div id="status"><div class="spinner"></div><span id="statusText">Waiting for your first drop.</span></div>
+  </div>
+
+  <div class="credit">Hydrology: USGS NLDI / NHDPlus · Watershed units: USGS WBD · Map: Esri ArcGIS</div>
+</div>
+
+<script>
+require([
+  "esri/Map",
+  "esri/views/MapView",
+  "esri/views/SceneView",
+  "esri/layers/GraphicsLayer",
+  "esri/Graphic",
+  "esri/geometry/Point",
+  "esri/geometry/Polyline",
+  "esri/geometry/Polygon"
+], function (Map, MapView, SceneView, GraphicsLayer, Graphic, Point, Polyline, Polygon) {
+
+  const NLDI = "https://api.water.usgs.gov/nldi";
+  const WGS84 = { wkid: 4326 };
+
+  /* ---------- layers ---------- */
+  const basinLayer = new GraphicsLayer({ title: "Highlighted watershed" });
+  const pathLayer  = new GraphicsLayer({ title: "Path downstream" });
+  const dropLayer  = new GraphicsLayer({ title: "Drop point" });
+
+  // Raster World Topographic basemap: renders reliably in both MapView and
+  // SceneView (some vector-tile basemaps can be finicky in 3D). Swap to
+  // "topo-vector" if you prefer the vector style in 2D.
+  const map = new Map({
+    basemap: "topo",
+    ground: "world-elevation",
+    layers: [basinLayer, pathLayer, dropLayer]
+  });
+
+  /* ---------- views: one shared container, swap between 2D and 3D ----------
+     Pattern from Esri's official "Switch view from 2D to 3D" sample: both
+     views share one Map; only the active view holds the container. Creating
+     a SceneView inside a hidden div (the previous approach) prevents its
+     WebGL canvas from initializing, which is why the 3D view never loaded. */
+  const view2d = new MapView({
+    container: "viewDiv",
+    map: map,
+    center: [-98, 39],
+    zoom: 4,
+    popupEnabled: false
+  });
+
+  let view3d = null;          // created lazily on first switch
+  let activeView = view2d;
+  view2d.on("click", onMapClick);
+
+  // Map control buttons on the right side of the map.
+  // Bottom-right keeps them clear of the floating panel in the top-right.
+  view2d.ui.move("zoom", "bottom-right");
+  attachHoverTooltip(view2d);
+
+  const btnDim = document.getElementById("btnDim");
+  btnDim.addEventListener("click", () => {
+    const goingTo3D = activeView === view2d;
+
+    if (goingTo3D && !view3d) {
+      view3d = new SceneView({ map: map, popupEnabled: false }); // no container yet
+      view3d.ui.move(["zoom", "navigation-toggle", "compass"], "bottom-right");
+      view3d.on("click", onMapClick);
+      attachHoverTooltip(view3d);
+      view3d.when(
+        () => { if (activeView === view3d) setStatus("3D terrain ready — click to trace a drop."); },
+        () => {
+          if (activeView !== view3d) return;
+          setStatus("3D view failed to start (WebGL may be unavailable). Returning to 2D.", "error");
+          view3d.container = null;
+          view2d.container = "viewDiv";
+          activeView = view2d;
+          btnDim.textContent = "View in 3D terrain";
+          btnDim.setAttribute("aria-pressed", "false");
+        }
+      );
+    }
+
+    const show = goingTo3D ? view3d : view2d;
+    const hide = goingTo3D ? view2d : view3d;
+
+    // hand off camera position, then swap the container between views
+    show.viewpoint = hide.viewpoint.clone();
+    hide.container = null;
+    show.container = "viewDiv";
+
+    activeView = show;
+    btnDim.textContent = goingTo3D ? "View in 2D topo" : "View in 3D terrain";
+    btnDim.setAttribute("aria-pressed", String(goingTo3D));
+  });
+
+  /* ---------- symbols ---------- */
+  const dropSymbol = {
+    type: "simple-marker", style: "circle", size: 13,
+    color: [0, 166, 200, 1], outline: { color: [255, 255, 255, 1], width: 2 }
+  };
+  const snapSymbol = {
+    type: "simple-marker", style: "circle", size: 7,
+    color: [15, 107, 215, 1], outline: { color: [255, 255, 255, 1], width: 1.2 }
+  };
+  const raindropLineSymbol = {
+    type: "simple-line", style: "dash", width: 2.4, color: [0, 166, 200, 1]
+  };
+  const streamSymbol = {
+    type: "simple-line", style: "solid", width: 3, color: [15, 107, 215, 0.95],
+    cap: "round", join: "round"
+  };
+  const basinSymbol = {
+    type: "simple-fill", color: [46, 139, 110, 0.22],
+    outline: { color: [46, 139, 110, 1], width: 2.2 }
+  };
+
+  /* ---------- layer checkboxes ---------- */
+  bindCheckbox("cbBasin", basinLayer);
+  bindCheckbox("cbPath",  pathLayer);
+  bindCheckbox("cbDrop",  dropLayer);
+  function bindCheckbox(id, layer) {
+    document.getElementById(id).addEventListener("change", e => {
+      layer.visible = e.target.checked;
+    });
+  }
+
+  document.getElementById("btnClear").addEventListener("click", () => {
+    clearAll();
+    setStatus("Cleared. Click the map to drop another drop.");
+  });
+  function clearAll() {
+    basinLayer.removeAll(); pathLayer.removeAll(); dropLayer.removeAll();
+    hideTooltip();
+  }
+
+  /* ---------- status helpers ---------- */
+  const statusBox = document.getElementById("status");
+  const statusText = document.getElementById("statusText");
+  function setStatus(msg, mode) {
+    statusText.textContent = msg;
+    statusBox.className = mode === "busy" ? "busy" : (mode === "error" ? "error" : "");
+  }
+
+  /* ---------- HUC lookup (USGS Watershed Boundary Dataset) ----------
+     hydro.nationalmap.gov/arcgis/rest/services/wbd/MapServer
+     layer 6 = 12-digit HU (subwatershed), layer 4 = 8-digit HU (subbasin) */
+  const WBD = "https://hydro.nationalmap.gov/arcgis/rest/services/wbd/MapServer";
+  async function queryHUC(layerId, hucField, lon, lat) {
+    const params = new URLSearchParams({
+      geometry: `${lon},${lat}`,
+      geometryType: "esriGeometryPoint",
+      inSR: "4326",
+      spatialRel: "esriSpatialRelIntersects",
+      outFields: `${hucField},name`,
+      returnGeometry: "false",
+      f: "json"
+    });
+    const data = await getJSON(`${WBD}/${layerId}/query?${params}`);
+    const attrs = data && data.features && data.features[0] && data.features[0].attributes;
+    return attrs ? { huc: attrs[hucField], name: attrs.name } : null;
+  }
+  async function lookupHucInfo(lon, lat) {
+    const [h12, h8] = await Promise.allSettled([
+      queryHUC(6, "huc12", lon, lat),   // subwatershed
+      queryHUC(4, "huc8",  lon, lat)    // subbasin
+    ]);
+    return {
+      huc12: h12.status === "fulfilled" ? h12.value : null,
+      huc8:  h8.status  === "fulfilled" ? h8.value  : null
+    };
+  }
+
+  /* ---------- hover tooltip over the highlighted watershed ---------- */
+  const tooltip = document.getElementById("tooltip");
+  function tooltipHTML(a) {
+    if (!a) return "";
+    if (!a.huc12 && !a.huc8) {
+      return a.pending
+        ? `<div class="t-dim">Looking up hydrologic unit…</div>`
+        : `<div class="t-dim">Hydrologic unit unavailable</div>`;
+    }
+    let html = "";
+    if (a.huc12) {
+      html += `<div class="t-title">${escapeHTML(a.huc12.name || "Unnamed subwatershed")}</div>` +
+              `<div>HUC12 <span class="t-huc">${escapeHTML(a.huc12.huc || "")}</span></div>`;
+    }
+    if (a.huc8) {
+      html += `<div class="t-dim">Subbasin: ${escapeHTML(a.huc8.name || "—")} ` +
+              `· HUC8 <span class="t-huc">${escapeHTML(a.huc8.huc || "")}</span></div>`;
+    }
+    return html;
+  }
+  function escapeHTML(s) {
+    return String(s).replace(/[&<>"']/g,
+      c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+  function showTooltip(x, y, attrs) {
+    tooltip.innerHTML = tooltipHTML(attrs);
+    tooltip.style.display = "block";
+    const pad = 14;
+    const r = tooltip.getBoundingClientRect();
+    let left = x + pad, top = y + pad;
+    if (left + r.width > window.innerWidth - 8)  left = x - r.width - pad;
+    if (top + r.height > window.innerHeight - 8) top = y - r.height - pad;
+    tooltip.style.left = `${Math.max(8, left)}px`;
+    tooltip.style.top  = `${Math.max(8, top)}px`;
+  }
+  function hideTooltip() { tooltip.style.display = "none"; }
+
+  function attachHoverTooltip(view) {
+    let hitTestBusy = false;
+    view.on("pointer-move", (event) => {
+      if (!basinLayer.visible || basinLayer.graphics.length === 0) { hideTooltip(); return; }
+      if (hitTestBusy) return;   // skip frames while a hit test is in flight
+      hitTestBusy = true;
+      view.hitTest(event, { include: basinLayer }).then((response) => {
+        hitTestBusy = false;
+        const hit = response.results && response.results.find(
+          r => r.graphic && r.graphic.layer === basinLayer);
+        if (hit) {
+          view.container.style.cursor = "pointer";
+          showTooltip(event.x, event.y, hit.graphic.attributes);
+        } else {
+          view.container.style.cursor = "";
+          hideTooltip();
+        }
+      }).catch(() => { hitTestBusy = false; });
+    });
+    view.on("pointer-leave", () => { view.container.style.cursor = ""; hideTooltip(); });
+  }
+
+  /* ---------- GeoJSON -> ArcGIS geometry helpers ---------- */
+  function linesFromGeoJSON(geom) {
+    // returns array of paths ([[x,y],...]) from LineString / MultiLineString
+    if (!geom) return [];
+    if (geom.type === "LineString") return [geom.coordinates.map(c => [c[0], c[1]])];
+    if (geom.type === "MultiLineString") return geom.coordinates.map(p => p.map(c => [c[0], c[1]]));
+    return [];
+  }
+  function polygonFromGeoJSON(geom) {
+    if (!geom) return null;
+    let rings = [];
+    if (geom.type === "Polygon") rings = geom.coordinates;
+    else if (geom.type === "MultiPolygon") geom.coordinates.forEach(p => rings.push(...p));
+    if (!rings.length) return null;
+    return new Polygon({ rings: rings, spatialReference: WGS84 });
+  }
+
+  /* ---------- main click handler ---------- */
+  let requestId = 0;
+  async function onMapClick(event) {
+    const pt = activeView.toMap(event) || event.mapPoint;
+    if (!pt) return;
+    const lon = normalizeLon(pt.longitude != null ? pt.longitude : pt.x);
+    const lat = pt.latitude != null ? pt.latitude : pt.y;
+    const myId = ++requestId;
+
+    clearAll();
+    const dropPoint = new Point({ longitude: lon, latitude: lat, spatialReference: WGS84 });
+    dropLayer.add(new Graphic({ geometry: dropPoint, symbol: dropSymbol }));
+    setStatus("Finding the nearest stream…", "busy");
+
+    try {
+      /* 1 — snap to the nearest NHD flowline to get its COMID */
+      const posUrl = `${NLDI}/linked-data/comid/position?coords=${encodeURIComponent(`POINT(${lon} ${lat})`)}`;
+      const pos = await getJSON(posUrl);
+      if (myId !== requestId) return;
+      const feat = pos && pos.features && pos.features[0];
+      if (!feat || !feat.properties || !feat.properties.comid) {
+        throw new UserError("No stream network found here. Try a spot inside the continental U.S.");
+      }
+      const comid = feat.properties.comid;
+
+      let snapPoint = null;
+      if (feat.geometry && feat.geometry.type === "Point") {
+        snapPoint = new Point({
+          longitude: feat.geometry.coordinates[0],
+          latitude:  feat.geometry.coordinates[1],
+          spatialReference: WGS84
+        });
+      }
+
+      /* 2 — overland raindrop trace from the drop to the stream (best effort) */
+      setStatus("Tracing the drop overland to the stream…", "busy");
+      let gotRaindrop = false;
+      try {
+        const ft = await postJSON(`${NLDI}/pygeoapi/processes/nldi-flowtrace/execution`, {
+          inputs: { lat: lat, lon: lon, raindroptrace: true, direction: "down" }
+        });
+        if (myId !== requestId) return;
+        const feats = (ft && ft.features) || [];
+        feats.forEach(f => {
+          const paths = linesFromGeoJSON(f.geometry);
+          if (paths.length) {
+            pathLayer.add(new Graphic({
+              geometry: new Polyline({ paths: paths, spatialReference: WGS84 }),
+              symbol: raindropLineSymbol
+            }));
+            gotRaindrop = true;
+          }
+          if (f.geometry && f.geometry.type === "Point" &&
+              f.properties && /intersection/i.test(f.properties.identifier || "")) {
+            snapPoint = new Point({
+              longitude: f.geometry.coordinates[0],
+              latitude:  f.geometry.coordinates[1],
+              spatialReference: WGS84
+            });
+          }
+        });
+      } catch (e) { /* raindrop service is best-effort */ }
+
+      if (!gotRaindrop && snapPoint) {
+        // fallback: dashed straight segment from the drop to the snapped stream point
+        pathLayer.add(new Graphic({
+          geometry: new Polyline({
+            paths: [[[lon, lat], [snapPoint.longitude, snapPoint.latitude]]],
+            spatialReference: WGS84
+          }),
+          symbol: raindropLineSymbol
+        }));
+      }
+      if (snapPoint) dropLayer.add(new Graphic({ geometry: snapPoint, symbol: snapSymbol }));
+
+      /* 3 — watershed (upstream basin) + 4 — downstream main-stem trace, in parallel */
+      setStatus("Delineating watershed and tracing downstream…", "busy");
+      const [basinRes, dmRes] = await Promise.allSettled([
+        getJSON(`${NLDI}/linked-data/comid/${comid}/basin?simplified=true`),
+        getJSON(`${NLDI}/linked-data/comid/${comid}/navigation/DM/flowlines?distance=9999`)
+      ]);
+      if (myId !== requestId) return;
+
+      let basinGraphic = null;
+      if (basinRes.status === "fulfilled" && basinRes.value && basinRes.value.features) {
+        const bf = basinRes.value.features[0];
+        const poly = bf && polygonFromGeoJSON(bf.geometry);
+        if (poly) {
+          basinGraphic = new Graphic({
+            geometry: poly, symbol: basinSymbol,
+            attributes: { pending: true, huc12: null, huc8: null }
+          });
+          basinLayer.add(basinGraphic);
+
+          // Look up the hydrologic unit (HUC) containing the snapped point,
+          // for the hover popup. Runs in the background; the tooltip shows
+          // "Looking up…" until it lands.
+          const qLon = snapPoint ? snapPoint.longitude : lon;
+          const qLat = snapPoint ? snapPoint.latitude  : lat;
+          lookupHucInfo(qLon, qLat).then(info => {
+            if (myId !== requestId) return;
+            basinGraphic.attributes = { pending: false, huc12: info.huc12, huc8: info.huc8 };
+            if (tooltip.style.display === "block") {
+              tooltip.innerHTML = tooltipHTML(basinGraphic.attributes);
+            }
+          }).catch(() => {
+            if (myId !== requestId) return;
+            basinGraphic.attributes = { pending: false, huc12: null, huc8: null };
+          });
+        }
+      }
+
+      let pathGraphic = null;
+      if (dmRes.status === "fulfilled" && dmRes.value && dmRes.value.features) {
+        const allPaths = [];
+        dmRes.value.features.forEach(f => allPaths.push(...linesFromGeoJSON(f.geometry)));
+        if (allPaths.length) {
+          pathGraphic = new Graphic({
+            geometry: new Polyline({ paths: allPaths, spatialReference: WGS84 }),
+            symbol: streamSymbol
+          });
+          pathLayer.add(pathGraphic);
+        }
+      }
+
+      if (!basinGraphic && !pathGraphic) {
+        throw new UserError("The hydrology services returned no results for this spot.");
+      }
+
+      /* zoom to everything we drew */
+      const targets = [basinGraphic, pathGraphic].filter(Boolean);
+      activeView.goTo(targets.length ? targets : dropPoint, { duration: 900 }).catch(() => {});
+
+      const miles = pathGraphic ? "traced to its terminal outlet" : "downstream trace unavailable";
+      setStatus(`Done — watershed highlighted; drop ${miles}.`);
+    } catch (err) {
+      if (myId !== requestId) return;
+      setStatus(err instanceof UserError ? err.message :
+        "Something went wrong reaching the USGS hydrology services. Try again in a moment.",
+        "error");
+    }
+  }
+
+  function normalizeLon(lon) {
+    while (lon > 180) lon -= 360;
+    while (lon < -180) lon += 360;
+    return lon;
+  }
+
+  /* ---------- fetch helpers ---------- */
+  class UserError extends Error {}
+  async function getJSON(url) {
+    const r = await fetch(url, { headers: { "Accept": "application/json" } });
+    if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
+    return r.json();
+  }
+  async function postJSON(url, body) {
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
+    return r.json();
+  }
+});
+</script>
+</body>
+</html>
