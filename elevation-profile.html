@@ -164,7 +164,10 @@
 
 <script>
 require([
+  "esri/config",
   "esri/Map",
+  "esri/Basemap",
+  "esri/layers/TileLayer",
   "esri/views/SceneView",
   "esri/layers/GraphicsLayer",
   "esri/layers/ElevationLayer",
@@ -173,10 +176,34 @@ require([
   "esri/geometry/Point",
   "esri/geometry/geometryEngine",
   "esri/widgets/Sketch/SketchViewModel"
-], (Map, SceneView, GraphicsLayer, ElevationLayer, Graphic,
+], (esriConfig, Map, Basemap, TileLayer, SceneView, GraphicsLayer, ElevationLayer, Graphic,
     Polyline, Point, geometryEngine, SketchViewModel) => {
 
   /* ---------------- scene ---------------- */
+
+  // OPTIONAL: paste a free ArcGIS Location Platform API key here to use the
+  // authenticated basemap styles service (e.g. imagery with labels).
+  // Leave it empty to use Esri's openly accessible World Imagery tile service,
+  // which works on static hosts like GitHub Pages without any credentials.
+  const API_KEY = "";
+
+  let basemap;
+  if (API_KEY){
+    esriConfig.apiKey = API_KEY;
+    basemap = "arcgis/imagery";                 // basemap styles service
+  } else {
+    basemap = new Basemap({
+      baseLayers: [
+        new TileLayer({
+          url: "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer",
+          copyright: "Esri, Maxar, Earthstar Geographics, and the GIS User Community"
+        })
+      ],
+      title: "World Imagery",
+      id: "world-imagery"
+    });
+  }
+
   const elevationLayer = new ElevationLayer({
     url: "https://elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer"
   });
@@ -185,8 +212,8 @@ require([
   const markerLayer = new GraphicsLayer({ elevationInfo: { mode: "on-the-ground" } });
 
   const map = new Map({
-    basemap: "satellite",
-    ground: "world-elevation",
+    basemap,
+    ground: { layers: [elevationLayer] },       // explicit public Terrain3D service
     layers: [lineLayer, markerLayer]
   });
 
