@@ -148,7 +148,7 @@
     <div id="status"><div class="spinner"></div><span id="statusText">Waiting for your first drop.</span></div>
   </div>
 
-  <div class="credit">Hydrology: USGS NLDI / NHDPlus · Watershed units: USGS WBD · Basemap: USGS National Map · 3D terrain: Esri</div>
+  <div class="credit">Hydrology: USGS NLDI / NHDPlus · Watershed units: USGS WBD · Basemap &amp; 3D terrain: Esri</div>
 </div>
 
 <script>
@@ -174,15 +174,14 @@ require([
   const dropLayer  = new GraphicsLayer({ title: "Drop point" });
 
   /* ---------- basemap ----------
-     Built explicitly from the USGS National Map topographic tile service:
-     public domain, no API key, no referrer restrictions, works the same
-     from localhost, GitHub Pages, or anywhere else. If it ever fails to
-     load, we fall back to Esri's World Topographic tile service. */
-  const USGS_TOPO_URL = "https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer";
+     Primary: Esri's ArcGIS Online World Topographic Map (clean, uncluttered
+     cartography), loaded explicitly by URL — no API key, works the same from
+     localhost or GitHub Pages. Fallback: USGS National Map topo tiles. */
   const ESRI_TOPO_URL = "https://services.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer";
+  const USGS_TOPO_URL = "https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer";
 
-  const usgsTopoLayer = new TileLayer({ url: USGS_TOPO_URL, title: "USGS Topo" });
-  const basemap = new Basemap({ baseLayers: [usgsTopoLayer], title: "USGS Topo" });
+  const esriTopoLayer = new TileLayer({ url: ESRI_TOPO_URL, title: "World Topographic" });
+  const basemap = new Basemap({ baseLayers: [esriTopoLayer], title: "World Topographic" });
 
   const map = new Map({
     basemap: basemap,
@@ -190,12 +189,12 @@ require([
     layers: [basinLayer, pathLayer, dropLayer]
   });
 
-  usgsTopoLayer.when(null, () => {
-    // Primary basemap failed — swap in Esri World Topo and tell the user.
-    setStatus("USGS basemap unavailable — switching to Esri topo tiles.", "error");
-    const esriTopoLayer = new TileLayer({ url: ESRI_TOPO_URL, title: "Esri World Topo" });
-    map.basemap = new Basemap({ baseLayers: [esriTopoLayer], title: "Esri World Topo" });
-    esriTopoLayer.when(
+  esriTopoLayer.when(null, () => {
+    // Primary basemap failed — swap in USGS topo tiles and tell the user.
+    setStatus("Esri basemap unavailable — switching to USGS topo tiles.", "error");
+    const usgsTopoLayer = new TileLayer({ url: USGS_TOPO_URL, title: "USGS Topo" });
+    map.basemap = new Basemap({ baseLayers: [usgsTopoLayer], title: "USGS Topo" });
+    usgsTopoLayer.when(
       () => setStatus("Basemap loaded. Click the map to trace a drop."),
       () => setStatus("No basemap could be loaded. Check the browser console / network tab.", "error")
     );
