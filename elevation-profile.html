@@ -80,6 +80,26 @@
   }
   .hint.show{ opacity:1; }
 
+  /* ---------- diagnostics ---------- */
+  #diag{
+    position:absolute; left:12px; bottom:12px; right:12px; max-width:640px;
+    background:#fff; border:1px solid var(--danger); border-left:4px solid var(--danger);
+    border-radius:6px; padding:10px 12px; z-index:8; display:none;
+    box-shadow:0 4px 14px rgba(34,48,61,.18);
+  }
+  #diag h3{
+    margin:0 0 4px; font:600 12px "IBM Plex Sans", sans-serif; color:var(--danger);
+    letter-spacing:.03em;
+  }
+  #diag pre{
+    margin:0; font:11px/1.5 "IBM Plex Mono", monospace; color:var(--text);
+    white-space:pre-wrap; word-break:break-word; max-height:120px; overflow:auto;
+  }
+  #diag button{
+    position:absolute; top:6px; right:8px; border:0; background:none; cursor:pointer;
+    color:var(--muted); font:14px monospace;
+  }
+
   /* ---------- profile panel ---------- */
   #profilePanel{
     flex:0 0 248px; background:var(--panel); border-top:1px solid var(--panel-edge);
@@ -133,6 +153,10 @@
     <h1>TERRAIN&nbsp;PROFILER</h1>
     <span class="sub">3D · WorldElevation/Terrain3D</span>
   </div>
+  <div class="units" role="group" aria-label="Basemap">
+    <button id="bmImagery" class="active" aria-pressed="true">Imagery</button>
+    <button id="bmTopo" aria-pressed="false">Topographic</button>
+  </div>
   <div class="units" role="group" aria-label="Units">
     <button id="unitM"  class="active" aria-pressed="true">m / km</button>
     <button id="unitFt" aria-pressed="false">ft / mi</button>
@@ -143,6 +167,11 @@
 
 <div id="viewDiv">
   <div class="hint" id="hint">click to place vertices · double-click to finish · esc to cancel</div>
+  <div id="diag" role="alert">
+    <button id="diagClose" aria-label="Dismiss">×</button>
+    <h3>Something failed to load</h3>
+    <pre id="diagText"></pre>
+  </div>
 </div>
 
 <div id="profilePanel">
@@ -179,41 +208,52 @@ require([
 ], (esriConfig, Map, Basemap, TileLayer, SceneView, GraphicsLayer, ElevationLayer, Graphic,
     Polyline, Point, geometryEngine, SketchViewModel) => {
 
+  /* ---------------- diagnostics ---------------- */
+  const diag = document.getElementById("diag");
+  const diagText = document.getElementById("diagText");
+  document.getElementById("diagClose").onclick = () => diag.style.display = "none";
+  function reportError(where, err){
+    const msg = (err && (err.message || (err.details && err.details.message))) || String(err);
+    diagText.textContent = "[" + where + "] " + msg;
+    diag.style.display = "block";
+    console.error(where, err);
+  }
+  window.addEventListener("error", e => reportError("script", e.error || e.message));
+  window.addEventListener("unhandledrejection", e => reportError("async", e.reason));
+
   /* ---------------- scene ---------------- */
 
-  // OPTIONAL: paste a free ArcGIS Location Platform API key here to use the
-  // authenticated basemap styles service (e.g. imagery with labels).
-  // Leave it empty to use Esri's openly accessible World Imagery tile service,
-  // which works on static hosts like GitHub Pages without any credentials.
-  const API_KEY = "";
+  // No token / OAuth / sign-in flow. Every service below is a publicly
+  // accessible ArcGIS REST endpoint, so identity must stay OFF — otherwise the
+  // SDK tries to authenticate against arcgis.com and the basemap silently dies
+  // on a static host like GitHub Pages.
+  esriConfig.request.useIdentity = false;
 
-  let basemap;
-  if (API_KEY){
-    esriConfig.apiKey = API_KEY;
-    basemap = "arcgis/imagery";                 // basemap styles service
-  } else {
-    basemap = new Basemap({
-      baseLayers: [
-        new TileLayer({
-          url: "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer",
-          copyright: "Esri, Maxar, Earthstar Geographics, and the GIS User Community"
-        })
-      ],
-      title: "World Imagery",
-      id: "world-imagery"
+  const IMAGERY_URL = "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer";
+  const TOPO_URL    = "https://services.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer";
+  const TERRAIN_URL = "https://elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer";
+
+  function makeBasemap(url, title){
+    const tl = new TileLayer({
+      url,
+      copyright: "Esri, Vantor, Earthstar Geographics, and the GIS User Community"
     });
+    tl.load().catch(err => reportError("basemap · " + title, err));
+    return new Basemap({ baseLayers: [tl], title });
   }
 
-  const elevationLayer = new ElevationLayer({
-    url: "https://elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer"
-  });
+  const imageryBasemap = makeBasemap(IMAGERY_URL, "World Imagery");
+  const topoBasemap    = makeBasemap(TOPO_URL,    "World Topographic");
+
+  const elevationLayer = new ElevationLayer({ url: TERRAIN_URL });
+  elevationLayer.load().catch(err => reportError("elevation service", err));
 
   const lineLayer   = new GraphicsLayer({ elevationInfo: { mode: "on-the-ground" } });
   const markerLayer = new GraphicsLayer({ elevationInfo: { mode: "on-the-ground" } });
 
   const map = new Map({
-    basemap,
-    ground: { layers: [elevationLayer] },       // explicit public Terrain3D service
+    basemap: imageryBasemap,
+    ground: { layers: [elevationLayer] },
     layers: [lineLayer, markerLayer]
   });
 
@@ -230,6 +270,11 @@ require([
     environment: { atmosphereEnabled: true, lighting: { directShadowsEnabled: false } },
     popupEnabled: false
   });
+
+  view.when(
+    () => { diag.style.display = "none"; },
+    err => reportError("scene view", err)
+  );
 
   const LINE_SYMBOL = {
     type: "line-3d",
@@ -586,6 +631,17 @@ require([
   }
   $("unitM").addEventListener("click", () => setUnits(true));
   $("unitFt").addEventListener("click", () => setUnits(false));
+
+  /* ---------------- basemap switch ---------------- */
+  function setBasemap(imagery){
+    map.basemap = imagery ? imageryBasemap : topoBasemap;
+    $("bmImagery").classList.toggle("active", imagery);
+    $("bmTopo").classList.toggle("active", !imagery);
+    $("bmImagery").setAttribute("aria-pressed", imagery);
+    $("bmTopo").setAttribute("aria-pressed", !imagery);
+  }
+  $("bmImagery").addEventListener("click", () => setBasemap(true));
+  $("bmTopo").addEventListener("click", () => setBasemap(false));
 
   new ResizeObserver(() => renderChart()).observe(wrap);
   renderChart();
