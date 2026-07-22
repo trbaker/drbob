@@ -44,6 +44,12 @@
     font-size: 18px; line-height: 1.15; margin: 0;
   }
   #panel h1 span { color: var(--stream); }
+  .ver {
+    align-self: flex-start; margin-left: auto;
+    font-family: "IBM Plex Sans", sans-serif; font-size: 10.5px; font-weight: 600;
+    color: #6b7f93; background: #ECE8DC;
+    padding: 2px 6px; border-radius: 999px; letter-spacing: 0.02em;
+  }
   .body { padding: 12px 16px 14px; }
   .hint { font-size: 13px; line-height: 1.45; margin: 0 0 10px; color: #3d5570; }
 
@@ -214,6 +220,7 @@
             stroke-width="1.6" stroke-linecap="round"/>
     </svg>
     <h1>Trace a Drop<br /><span>watershed &amp; downstream tracer</span></h1>
+    <span class="ver">vs.6</span>
   </header>
 
   <div class="body">
@@ -273,12 +280,13 @@ require([
   "esri/views/SceneView",
   "esri/layers/GraphicsLayer",
   "esri/layers/TileLayer",
+  "esri/layers/FeatureLayer",
   "esri/Graphic",
   "esri/geometry/Point",
   "esri/geometry/Polyline",
   "esri/geometry/Polygon",
   "esri/geometry/Extent"
-], function (Map, Basemap, MapView, SceneView, GraphicsLayer, TileLayer, Graphic, Point, Polyline, Polygon, Extent) {
+], function (Map, Basemap, MapView, SceneView, GraphicsLayer, TileLayer, FeatureLayer, Graphic, Point, Polyline, Polygon, Extent) {
 
   const NLDI = "https://api.water.usgs.gov/nldi";
   const WGS84 = { wkid: 4326 };
@@ -313,27 +321,36 @@ require([
   const hoverLayer = new GraphicsLayer({ title: "Profile position" }); // linked-hover marker
 
   /* ---------- basemap ----------
-     Topographic option: Esri's World Terrain Base — a clean, minimal
-     terrain canvas (soft hillshade, subtle water, no clutter) — paired
-     with its matching muted reference overlay (boundaries + place names)
-     at 50% transparency. World Hillshade sits underneath so terrain
-     remains visible when zoomed in past Terrain Base's deepest tiles.
-     All layers loaded explicitly by URL — no API key.
+     Terrain option: Esri's World Terrain Base — a clean, minimal terrain
+     canvas (soft hillshade, subtle water, no clutter). No labels, no
+     roads. The only overlay is a vector boundaries layer (USA states,
+     outline-only) whose outer edge draws the national boundary and whose
+     interior edges draw state lines. World Hillshade sits underneath so
+     terrain remains visible when zoomed in past Terrain Base's deepest
+     tiles. All layers loaded explicitly by URL — no API key.
      Fallback: USGS National Map topo tiles. */
   const TERRAIN_URL   = "https://services.arcgisonline.com/arcgis/rest/services/Elevation/World_Terrain_Base/MapServer";
-  const REFERENCE_URL = "https://services.arcgisonline.com/arcgis/rest/services/Reference/World_Reference_Overlay/MapServer";
   const HILLSHADE_URL = "https://services.arcgisonline.com/arcgis/rest/services/Elevation/World_Hillshade/MapServer";
   const USGS_TOPO_URL = "https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer";
+  const STATES_URL    = "https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/USA_States_Generalized/FeatureServer/0";
 
   const hillshadeLayer = new TileLayer({ url: HILLSHADE_URL, title: "World Hillshade" });
   const terrainLayer = new TileLayer({ url: TERRAIN_URL, title: "World Terrain Base" });
-  const labelsLayer = new TileLayer({
-    url: REFERENCE_URL, title: "Boundaries & place labels",
-    opacity: 0.5            // labels and boundaries render at 50% transparency
+  const boundariesLayer = new FeatureLayer({
+    url: STATES_URL, title: "State & national boundaries",
+    legendEnabled: false, popupEnabled: false,
+    renderer: {
+      type: "simple",
+      symbol: {
+        type: "simple-fill",
+        color: [0, 0, 0, 0],                      // no fill — outlines only
+        outline: { color: [106, 116, 128, 0.75], width: 1 }
+      }
+    }
   });
   const basemap = new Basemap({
     baseLayers: [hillshadeLayer, terrainLayer],
-    referenceLayers: [labelsLayer],
+    referenceLayers: [boundariesLayer],
     title: "Terrain"
   });
 
