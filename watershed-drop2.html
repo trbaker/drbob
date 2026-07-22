@@ -141,10 +141,17 @@
 
   /* ---------- elevation profile panel ---------- */
   #profilePanel {
-    position: absolute; left: 0; right: 0; bottom: 0; z-index: 45;
+    position: absolute; right: 0; bottom: 0; z-index: 45;
+    left: 372px;               /* clears the 330px main panel + margins */
     height: 31%; min-height: 190px; display: none;
-    background: var(--paper); border-top: 2px solid var(--line);
+    background: var(--paper);
+    border-top: 2px solid var(--line); border-left: 2px solid var(--line);
+    border-top-left-radius: 10px;
     box-shadow: 0 -6px 20px rgba(22, 50, 79, 0.18);
+  }
+  @media (max-width: 720px) {
+    /* narrow screens: no room beside the panel — use the full width */
+    #profilePanel { left: 0; border-left: none; border-top-left-radius: 0; }
   }
   .pp-head {
     display: flex; align-items: center; gap: 14px;
@@ -174,11 +181,12 @@
     white-space: nowrap; font-variant-numeric: tabular-nums;
   }
   #ppReopen {
-    position: absolute; bottom: 14px; left: 14px; z-index: 45;
+    position: absolute; bottom: 14px; left: 372px; z-index: 45;
     display: none; flex: none; width: auto;
     background: var(--paper); color: var(--ink); border: 1px solid var(--ink);
     box-shadow: 0 3px 10px rgba(22, 50, 79, 0.2);
   }
+  @media (max-width: 720px) { #ppReopen { left: 14px; } }
 </style>
 </head>
 <body>
@@ -274,6 +282,29 @@ require([
 
   const NLDI = "https://api.water.usgs.gov/nldi";
   const WGS84 = { wkid: 4326 };
+
+  /* ---------- global error trap ----------
+     Surfaces any uncaught error or unhandled promise rejection in the
+     status line (and the console) so problems are visible and reportable
+     instead of failing silently. */
+  window.addEventListener("error", (e) => {
+    console.error("Uncaught error:", e.error || e.message);
+    reportError(e.message || (e.error && e.error.message));
+  });
+  window.addEventListener("unhandledrejection", (e) => {
+    console.error("Unhandled rejection:", e.reason);
+    const msg = e.reason && (e.reason.message || String(e.reason));
+    // Esri's goTo/interrupt AbortErrors are routine — don't alarm the user
+    if (e.reason && e.reason.name === "AbortError") return;
+    reportError(msg);
+  });
+  function reportError(msg) {
+    const el = document.getElementById("statusText");
+    if (el) {
+      el.textContent = `Unexpected error: ${msg || "see browser console"}`;
+      document.getElementById("status").className = "error";
+    }
+  }
 
   /* ---------- layers ---------- */
   const basinLayer = new GraphicsLayer({ title: "Highlighted watershed" });
