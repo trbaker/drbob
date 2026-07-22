@@ -252,8 +252,6 @@
         Topographic</label>
       <label class="layer-row"><input type="radio" name="basemapChoice" id="bmStreets" value="streets" />
         Streets</label>
-      <label class="layer-row"><input type="checkbox" id="cbLabels" checked />
-        Place labels (lightened)</label>
     </fieldset>
 
     <div class="buttons">
@@ -327,8 +325,8 @@ require([
 
   const hillshadeLayer = new TileLayer({ url: HILLSHADE_URL, title: "World Hillshade" });
   const labelsLayer = new TileLayer({
-    url: PLACES_URL, title: "Place labels",
-    opacity: 0.5            // lightened; toggled by the "Place labels" checkbox
+    url: PLACES_URL, title: "Boundaries & place labels",
+    opacity: 0.5            // labels and boundaries render at 50% transparency
   });
   const basemap = new Basemap({
     baseLayers: [hillshadeLayer],
@@ -352,11 +350,6 @@ require([
       () => setStatus("Basemap loaded. Click the map to trace a drop."),
       () => setStatus("No basemap could be loaded. Check the browser console / network tab.", "error")
     );
-  });
-
-  // "Place labels" checkbox: unchecked removes basemap labels entirely
-  document.getElementById("cbLabels").addEventListener("change", (e) => {
-    labelsLayer.visible = e.target.checked;
   });
 
   /* ---------- basemap selector (topographic <-> streets) ----------
