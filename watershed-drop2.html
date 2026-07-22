@@ -249,7 +249,7 @@
     <fieldset>
       <legend>Basemap</legend>
       <label class="layer-row"><input type="radio" name="basemapChoice" id="bmTopo" value="topo" checked />
-        Topographic</label>
+        Terrain</label>
       <label class="layer-row"><input type="radio" name="basemapChoice" id="bmStreets" value="streets" />
         Streets</label>
     </fieldset>
@@ -313,25 +313,28 @@ require([
   const hoverLayer = new GraphicsLayer({ title: "Profile position" }); // linked-hover marker
 
   /* ---------- basemap ----------
-     Topographic option: Esri World Hillshade (clean, label-free terrain)
-     with place-name labels as a SEPARATE reference layer at reduced
-     opacity — labels stay subtle and can be toggled off entirely.
-     (Classic raster topo tiles have labels baked in, so a composite is
-     the only way to lighten them.) All layers are loaded explicitly by
-     URL — no API key. Fallback: USGS National Map topo tiles. */
+     Topographic option: Esri's World Terrain Base — a clean, minimal
+     terrain canvas (soft hillshade, subtle water, no clutter) — paired
+     with its matching muted reference overlay (boundaries + place names)
+     at 50% transparency. World Hillshade sits underneath so terrain
+     remains visible when zoomed in past Terrain Base's deepest tiles.
+     All layers loaded explicitly by URL — no API key.
+     Fallback: USGS National Map topo tiles. */
+  const TERRAIN_URL   = "https://services.arcgisonline.com/arcgis/rest/services/Elevation/World_Terrain_Base/MapServer";
+  const REFERENCE_URL = "https://services.arcgisonline.com/arcgis/rest/services/Reference/World_Reference_Overlay/MapServer";
   const HILLSHADE_URL = "https://services.arcgisonline.com/arcgis/rest/services/Elevation/World_Hillshade/MapServer";
-  const PLACES_URL    = "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer";
   const USGS_TOPO_URL = "https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer";
 
   const hillshadeLayer = new TileLayer({ url: HILLSHADE_URL, title: "World Hillshade" });
+  const terrainLayer = new TileLayer({ url: TERRAIN_URL, title: "World Terrain Base" });
   const labelsLayer = new TileLayer({
-    url: PLACES_URL, title: "Boundaries & place labels",
+    url: REFERENCE_URL, title: "Boundaries & place labels",
     opacity: 0.5            // labels and boundaries render at 50% transparency
   });
   const basemap = new Basemap({
-    baseLayers: [hillshadeLayer],
+    baseLayers: [hillshadeLayer, terrainLayer],
     referenceLayers: [labelsLayer],
-    title: "Topographic"
+    title: "Terrain"
   });
 
   const map = new Map({
@@ -340,9 +343,9 @@ require([
     layers: [basinLayer, pathLayer, dropLayer, hoverLayer]
   });
 
-  hillshadeLayer.when(null, () => {
+  terrainLayer.when(null, () => {
     // Primary basemap failed — swap in USGS topo tiles and tell the user.
-    setStatus("Esri basemap unavailable — switching to USGS topo tiles.", "error");
+    setStatus("Esri terrain basemap unavailable — switching to USGS topo tiles.", "error");
     const usgsTopoLayer = new TileLayer({ url: USGS_TOPO_URL, title: "USGS Topo" });
     topoBasemap = new Basemap({ baseLayers: [usgsTopoLayer], title: "USGS Topo" });
     if (document.getElementById("bmTopo").checked) map.basemap = topoBasemap;
