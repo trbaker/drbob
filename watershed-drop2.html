@@ -252,6 +252,8 @@
         Topographic</label>
       <label class="layer-row"><input type="radio" name="basemapChoice" id="bmStreets" value="streets" />
         Streets</label>
+      <label class="layer-row"><input type="checkbox" id="cbLabels" checked />
+        Place labels (lightened)</label>
     </fieldset>
 
     <div class="buttons">
@@ -313,14 +315,26 @@ require([
   const hoverLayer = new GraphicsLayer({ title: "Profile position" }); // linked-hover marker
 
   /* ---------- basemap ----------
-     Primary: Esri's ArcGIS Online World Topographic Map (clean, uncluttered
-     cartography), loaded explicitly by URL — no API key, works the same from
-     localhost or GitHub Pages. Fallback: USGS National Map topo tiles. */
-  const ESRI_TOPO_URL = "https://services.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer";
+     Topographic option: Esri World Hillshade (clean, label-free terrain)
+     with place-name labels as a SEPARATE reference layer at reduced
+     opacity — labels stay subtle and can be toggled off entirely.
+     (Classic raster topo tiles have labels baked in, so a composite is
+     the only way to lighten them.) All layers are loaded explicitly by
+     URL — no API key. Fallback: USGS National Map topo tiles. */
+  const HILLSHADE_URL = "https://services.arcgisonline.com/arcgis/rest/services/Elevation/World_Hillshade/MapServer";
+  const PLACES_URL    = "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer";
   const USGS_TOPO_URL = "https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer";
 
-  const esriTopoLayer = new TileLayer({ url: ESRI_TOPO_URL, title: "World Topographic" });
-  const basemap = new Basemap({ baseLayers: [esriTopoLayer], title: "World Topographic" });
+  const hillshadeLayer = new TileLayer({ url: HILLSHADE_URL, title: "World Hillshade" });
+  const labelsLayer = new TileLayer({
+    url: PLACES_URL, title: "Place labels",
+    opacity: 0.5            // lightened; toggled by the "Place labels" checkbox
+  });
+  const basemap = new Basemap({
+    baseLayers: [hillshadeLayer],
+    referenceLayers: [labelsLayer],
+    title: "Topographic"
+  });
 
   const map = new Map({
     basemap: basemap,
@@ -328,7 +342,7 @@ require([
     layers: [basinLayer, pathLayer, dropLayer, hoverLayer]
   });
 
-  esriTopoLayer.when(null, () => {
+  hillshadeLayer.when(null, () => {
     // Primary basemap failed — swap in USGS topo tiles and tell the user.
     setStatus("Esri basemap unavailable — switching to USGS topo tiles.", "error");
     const usgsTopoLayer = new TileLayer({ url: USGS_TOPO_URL, title: "USGS Topo" });
@@ -338,6 +352,11 @@ require([
       () => setStatus("Basemap loaded. Click the map to trace a drop."),
       () => setStatus("No basemap could be loaded. Check the browser console / network tab.", "error")
     );
+  });
+
+  // "Place labels" checkbox: unchecked removes basemap labels entirely
+  document.getElementById("cbLabels").addEventListener("change", (e) => {
+    labelsLayer.visible = e.target.checked;
   });
 
   /* ---------- basemap selector (topographic <-> streets) ----------
@@ -1047,6 +1066,26 @@ require([
       if (dmRes.status === "fulfilled" && dmRes.value && dmRes.value.features) {
         const allPaths = [];
         dmRes.value.features.forEach(f => allPaths.push(...linesFromGeoJSON(f.geometry)));
+
+        /* The first flowline returned is the ENTIRE headwater reach the drop
+           snaps into — including its portion upstream of the entry point.
+           Trim everything upstream of the vertex nearest the snapped entry
+           point, and start the line exactly at that entry point, so the
+           blue trace begins where the drop actually joins the stream. */
+        if (allPaths.length && snapPoint) {
+          const sx = snapPoint.longitude, sy = snapPoint.latitude;
+          let bp = -1, bv = 0, bd = Infinity;
+          allPaths.forEach((p, i) => p.forEach((c, vi) => {
+            const dd = (c[0] - sx) ** 2 + (c[1] - sy) ** 2;
+            if (dd < bd) { bd = dd; bp = i; bv = vi; }
+          }));
+          if (bp >= 0) {
+            const trimmed = allPaths[bp].slice(bv);
+            trimmed.unshift([sx, sy]);
+            allPaths[bp] = trimmed;
+          }
+        }
+
         if (allPaths.length) {
           pathGraphic = new Graphic({
             geometry: new Polyline({ paths: allPaths, spatialReference: WGS84 }),
