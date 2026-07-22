@@ -1009,6 +1009,7 @@ require([
         }
       } catch (e) { /* raindrop service is best-effort */ }
 
+      let connectorDrawn = gotRaindrop;
       if (!gotRaindrop && snapPoint) {
         // fallback: dashed straight segment from the drop to the snapped stream point
         pathLayer.add(new Graphic({
@@ -1018,6 +1019,7 @@ require([
           }),
           symbol: raindropLineSymbol
         }));
+        connectorDrawn = true;
       }
       if (snapPoint) dropLayer.add(new Graphic({ geometry: snapPoint, symbol: snapSymbol }));
 
@@ -1063,6 +1065,23 @@ require([
         const allPaths = [];
         dmRes.value.features.forEach(f => allPaths.push(...linesFromGeoJSON(f.geometry)));
 
+        /* If we never got a snapped entry point from the services, derive one:
+           the flowline vertex nearest the click. Guarantees the trim below and
+           the connector always have an anchor. */
+        if (!snapPoint && allPaths.length) {
+          let bd = Infinity, best = null;
+          allPaths.forEach(p => p.forEach(c => {
+            const dd = (c[0] - lon) ** 2 + (c[1] - lat) ** 2;
+            if (dd < bd) { bd = dd; best = c; }
+          }));
+          if (best) {
+            snapPoint = new Point({
+              longitude: best[0], latitude: best[1], spatialReference: WGS84
+            });
+            dropLayer.add(new Graphic({ geometry: snapPoint, symbol: snapSymbol }));
+          }
+        }
+
         /* The first flowline returned is the ENTIRE headwater reach the drop
            snaps into — including its portion upstream of the entry point.
            Trim everything upstream of the vertex nearest the snapped entry
@@ -1088,6 +1107,20 @@ require([
             symbol: streamSymbol
           });
           pathLayer.add(pathGraphic);
+        }
+
+        /* Last line of defense: if no overland connector was drawn earlier
+           (raindrop service AND snap lookup both came back empty), draw the
+           straight dashed segment now so the dot and trace always connect. */
+        if (!connectorDrawn && snapPoint && pathGraphic) {
+          pathLayer.add(new Graphic({
+            geometry: new Polyline({
+              paths: [[[lon, lat], [snapPoint.longitude, snapPoint.latitude]]],
+              spatialReference: WGS84
+            }),
+            symbol: raindropLineSymbol
+          }));
+          connectorDrawn = true;
         }
       }
 
