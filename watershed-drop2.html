@@ -220,7 +220,7 @@
             stroke-width="1.6" stroke-linecap="round"/>
     </svg>
     <h1>Trace a Drop<br /><span>watershed &amp; downstream tracer</span></h1>
-    <span class="ver">vs.6</span>
+    <span class="ver">vs.7</span>
   </header>
 
   <div class="body">
@@ -274,6 +274,7 @@
 
 <script>
 require([
+  "esri/config",
   "esri/Map",
   "esri/Basemap",
   "esri/views/MapView",
@@ -286,7 +287,12 @@ require([
   "esri/geometry/Polyline",
   "esri/geometry/Polygon",
   "esri/geometry/Extent"
-], function (Map, Basemap, MapView, SceneView, GraphicsLayer, TileLayer, FeatureLayer, Graphic, Point, Polyline, Polygon, Extent) {
+], function (esriConfig, Map, Basemap, MapView, SceneView, GraphicsLayer, TileLayer, FeatureLayer, Graphic, Point, Polyline, Polygon, Extent) {
+
+  /* Never show an ArcGIS sign-in dialog. If any service ever demands
+     credentials, the request simply fails and our fallbacks/status line
+     handle it — the user is never prompted to log in. */
+  esriConfig.request.useIdentity = false;
 
   const NLDI = "https://api.water.usgs.gov/nldi";
   const WGS84 = { wkid: 4326 };
@@ -332,13 +338,14 @@ require([
   const TERRAIN_URL   = "https://services.arcgisonline.com/arcgis/rest/services/Elevation/World_Terrain_Base/MapServer";
   const HILLSHADE_URL = "https://services.arcgisonline.com/arcgis/rest/services/Elevation/World_Hillshade/MapServer";
   const USGS_TOPO_URL = "https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer";
-  const STATES_URL    = "https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/USA_States_Generalized/FeatureServer/0";
+  const STATES_URL    = "https://tigerweb.geo.census.gov/arcgis/rest/services/Generalized_ACS2023/State_County/MapServer/0";
 
   const hillshadeLayer = new TileLayer({ url: HILLSHADE_URL, title: "World Hillshade" });
   const terrainLayer = new TileLayer({ url: TERRAIN_URL, title: "World Terrain Base" });
   const boundariesLayer = new FeatureLayer({
     url: STATES_URL, title: "State & national boundaries",
     legendEnabled: false, popupEnabled: false,
+    minScale: 0, maxScale: 0,   // override service scale limits: visible at every zoom
     renderer: {
       type: "simple",
       symbol: {
@@ -347,6 +354,10 @@ require([
         outline: { color: [106, 116, 128, 0.75], width: 1 }
       }
     }
+  });
+  boundariesLayer.when(null, () => {
+    // Boundaries are decorative — if the service is down, drop them quietly.
+    basemap.referenceLayers.remove(boundariesLayer);
   });
   const basemap = new Basemap({
     baseLayers: [hillshadeLayer, terrainLayer],
