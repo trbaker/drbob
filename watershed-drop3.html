@@ -1,0 +1,1399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Trace a Drop — Watershed &amp; Downstream Tracer</title>
+
+<!-- ArcGIS Maps SDK for JavaScript -->
+<link rel="stylesheet" href="https://js.arcgis.com/4.29/esri/themes/light/main.css" />
+<script src="https://js.arcgis.com/4.29/"></script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Bitter:wght@600;800&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+
+<style>
+  :root {
+    --paper:   #F7F5EF;
+    --ink:     #16324F;
+    --stream:  #0F6BD7;
+    --basin:   #2E8B6E;
+    --drop:    #00A6C8;
+    --line:    #D8D3C4;
+  }
+  html, body { margin: 0; height: 100%; font-family: "IBM Plex Sans", sans-serif; }
+  #viewDiv { position: absolute; inset: 0; }
+
+  /* ---------- control card ---------- */
+  #panel {
+    position: absolute; top: 14px; left: 14px; z-index: 50;
+    width: min(330px, calc(100vw - 28px));
+    background: var(--paper); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: 0 6px 24px rgba(22, 50, 79, 0.22);
+    overflow: hidden;
+  }
+  #panel header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  #panel header svg { flex: none; }
+  #panel h1 {
+    font-family: "Bitter", serif; font-weight: 800;
+    font-size: 18px; line-height: 1.15; margin: 0;
+  }
+  #panel h1 span { color: var(--stream); }
+  .ver {
+    align-self: flex-start; margin-left: auto;
+    font-family: "IBM Plex Sans", sans-serif; font-size: 10.5px; font-weight: 600;
+    color: #6b7f93; background: #ECE8DC;
+    padding: 2px 6px; border-radius: 999px; letter-spacing: 0.02em;
+  }
+  .body { padding: 12px 16px 14px; }
+  .hint { font-size: 13px; line-height: 1.45; margin: 0 0 10px; color: #3d5570; }
+
+  /* ---------- place / address search ---------- */
+  .search-wrap { position: relative; margin: 0 0 10px; }
+  .search-row { display: flex; gap: 6px; }
+  #searchInput {
+    flex: 1; min-width: 0;
+    font: 14px "IBM Plex Sans", sans-serif; color: var(--ink);
+    padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px;
+    background: #fff;
+  }
+  #searchInput:focus { outline: 2px solid var(--drop); outline-offset: 0; }
+  #searchBtn {
+    flex: none; width: 40px; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #searchResults {
+    position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 70;
+    margin: 0; padding: 4px; list-style: none;
+    background: #fff; border: 1px solid var(--line); border-radius: 7px;
+    box-shadow: 0 6px 18px rgba(22, 50, 79, 0.2);
+    max-height: 210px; overflow-y: auto; display: none;
+  }
+  #searchResults li {
+    padding: 7px 9px; border-radius: 5px; cursor: pointer;
+    font-size: 13px; line-height: 1.35;
+  }
+  #searchResults li:hover, #searchResults li:focus {
+    background: #EAF3FB; outline: none;
+  }
+  #searchResults li.none { color: #6b7f93; cursor: default; }
+  #searchResults li.none:hover { background: transparent; }
+
+  fieldset {
+    border: 1px solid var(--line); border-radius: 8px;
+    margin: 0 0 10px; padding: 8px 12px 10px;
+  }
+  legend {
+    font-family: "Bitter", serif; font-weight: 600; font-size: 12px;
+    letter-spacing: 0.06em; text-transform: uppercase; padding: 0 6px;
+  }
+  .layer-row { display: flex; align-items: center; gap: 9px; padding: 5px 0; font-size: 14px; }
+  .layer-row input { width: 16px; height: 16px; accent-color: var(--stream); cursor: pointer; flex: none; }
+  .swatch { width: 18px; height: 12px; border-radius: 3px; flex: none; }
+  .sw-basin { background: rgba(46,139,110,0.35); border: 2px solid var(--basin); }
+  .sw-path  { background: transparent; border-top: 3px solid var(--stream); height: 0; }
+  .sw-drop  { background: var(--drop); border-radius: 50%; width: 12px; height: 12px; border: 2px solid #fff; box-shadow: 0 0 0 1px var(--drop); }
+
+  .buttons { display: flex; gap: 8px; }
+  button {
+    flex: 1; font: 600 13px "IBM Plex Sans", sans-serif;
+    padding: 8px 10px; border-radius: 7px; cursor: pointer;
+    border: 1px solid var(--ink); background: var(--ink); color: var(--paper);
+    transition: transform 0.06s ease;
+  }
+  button:active { transform: translateY(1px); }
+  button.secondary { background: transparent; color: var(--ink); }
+  button:focus-visible { outline: 3px solid var(--drop); outline-offset: 1px; }
+
+  #status {
+    margin-top: 10px; font-size: 13px; min-height: 18px;
+    display: flex; align-items: center; gap: 8px; color: #3d5570;
+  }
+  #status.error { color: #A33A2C; }
+  .spinner {
+    width: 14px; height: 14px; flex: none; border-radius: 50%;
+    border: 2px solid var(--line); border-top-color: var(--stream);
+    animation: spin 0.8s linear infinite; display: none;
+  }
+  #status.busy .spinner { display: block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2s; } }
+
+  .credit {
+    font-size: 11px; color: #6b7f93; padding: 8px 16px 10px;
+    border-top: 1px solid var(--line);
+  }
+
+  /* ---------- hover tooltip for the watershed ---------- */
+  #tooltip {
+    position: absolute; z-index: 60; display: none;
+    pointer-events: none; max-width: 260px;
+    background: var(--ink); color: var(--paper);
+    padding: 9px 12px; border-radius: 7px;
+    font-size: 12.5px; line-height: 1.5;
+    box-shadow: 0 4px 14px rgba(22, 50, 79, 0.35);
+  }
+  #tooltip .t-title {
+    font-family: "Bitter", serif; font-weight: 600; font-size: 13.5px;
+    margin-bottom: 2px;
+  }
+  #tooltip .t-huc { color: #9FC9EE; font-variant-numeric: tabular-nums; }
+  #tooltip .t-dim { color: #B9C6D4; }
+
+  /* ---------- elevation profile panel ---------- */
+  #profilePanel {
+    position: absolute; right: 0; bottom: 0; z-index: 45;
+    left: 372px;               /* clears the 330px main panel + margins */
+    height: 31%; min-height: 190px; display: none;
+    background: var(--paper);
+    border-top: 2px solid var(--line); border-left: 2px solid var(--line);
+    border-top-left-radius: 10px;
+    box-shadow: 0 -6px 20px rgba(22, 50, 79, 0.18);
+  }
+  @media (max-width: 720px) {
+    /* narrow screens: no room beside the panel — use the full width */
+    #profilePanel { left: 0; border-left: none; border-top-left-radius: 0; }
+  }
+  .pp-head {
+    display: flex; align-items: center; gap: 14px;
+    padding: 9px 16px 4px;
+  }
+  .pp-title {
+    font-family: "Bitter", serif; font-weight: 800; font-size: 15px;
+    color: var(--ink); white-space: nowrap;
+  }
+  .pp-title span { color: var(--stream); font-size: 13px; font-weight: 600; }
+  #ppStats {
+    flex: 1; min-width: 0; font-size: 12.5px; color: #3d5570;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #ppClose {
+    flex: none; width: 28px; height: 28px; padding: 0;
+    background: transparent; color: var(--ink);
+    border: 1px solid var(--line); border-radius: 6px;
+    font-size: 14px; line-height: 1;
+  }
+  #ppChart { position: absolute; top: 42px; left: 8px; right: 8px; bottom: 6px; cursor: crosshair; }
+  #ppChart svg { display: block; }
+  #ppLabel {
+    position: absolute; display: none; z-index: 46; pointer-events: none;
+    background: var(--ink); color: var(--paper);
+    font-size: 12px; padding: 3px 8px; border-radius: 5px;
+    white-space: nowrap; font-variant-numeric: tabular-nums;
+  }
+  #ppReopen {
+    position: absolute; bottom: 14px; left: 372px; z-index: 45;
+    display: none; flex: none; width: auto;
+    background: var(--paper); color: var(--ink); border: 1px solid var(--ink);
+    box-shadow: 0 3px 10px rgba(22, 50, 79, 0.2);
+  }
+  @media (max-width: 720px) { #ppReopen { left: 14px; } }
+
+  /* ===== DROUGHT CARDS (removable feature) — CSS BEGIN ===== */
+  #droughtCard {
+    position: absolute; top: 14px; right: 14px; z-index: 45;
+    width: min(300px, calc(100vw - 28px)); display: none;
+    background: var(--paper); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: 0 6px 24px rgba(22, 50, 79, 0.22);
+  }
+  .dc-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px 8px; border-bottom: 1px solid var(--line);
+  }
+  .dc-title { font-family: "Bitter", serif; font-weight: 800; font-size: 14px; flex: 1; }
+  #dcClose {
+    flex: none; width: 24px; height: 24px; padding: 0;
+    background: transparent; color: var(--ink);
+    border: 1px solid var(--line); border-radius: 6px;
+    font-size: 12px; line-height: 1;
+  }
+  .dc-body { padding: 10px 14px 12px; font-size: 12.5px; line-height: 1.5; color: #3d5570; }
+  .dc-sec { margin: 0 0 12px; }
+  .dc-sec:last-child { margin-bottom: 0; }
+  .dc-sec h3 {
+    font: 600 11px "IBM Plex Sans", sans-serif; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--ink); margin: 0 0 5px;
+  }
+  .dc-bar {
+    display: flex; height: 12px; border-radius: 6px; overflow: hidden;
+    border: 1px solid var(--line); margin: 5px 0 4px; background: #fff;
+  }
+  .dc-bar span { height: 100%; display: block; }
+  .dc-dim { color: #6b7f93; }
+  .dc-flow-val {
+    font-family: "Bitter", serif; font-weight: 800; font-size: 19px;
+    color: var(--stream); line-height: 1.2;
+  }
+  .dc-flow-val small { font-size: 12px; font-weight: 600; }
+  /* ===== DROUGHT CARDS — CSS END ===== */
+</style>
+</head>
+<body>
+
+<div id="viewDiv"></div>
+<div id="tooltip" role="tooltip"></div>
+
+<div id="profilePanel">
+  <div class="pp-head">
+    <div class="pp-title">Elevation profile <span>— path downstream</span></div>
+    <div id="ppStats"></div>
+    <button id="ppClose" type="button" aria-label="Close elevation profile" title="Close">✕</button>
+  </div>
+  <div id="ppChart"></div>
+  <div id="ppLabel"></div>
+</div>
+<button id="ppReopen" type="button">▲ Elevation profile</button>
+
+<!-- ===== DROUGHT CARDS (removable feature) — HTML BEGIN ===== -->
+<div id="droughtCard">
+  <div class="dc-head">
+    <div class="dc-title">Watershed conditions</div>
+    <button id="dcClose" type="button" aria-label="Close watershed conditions" title="Close">✕</button>
+  </div>
+  <div class="dc-body">
+    <div class="dc-sec">
+      <h3>Drought — U.S. Drought Monitor</h3>
+      <div id="dcDrought"><span class="dc-dim">Waiting for a trace…</span></div>
+    </div>
+    <div class="dc-sec">
+      <h3>Streamflow downstream</h3>
+      <div id="dcFlow"><span class="dc-dim">Waiting for a trace…</span></div>
+    </div>
+  </div>
+</div>
+<!-- ===== DROUGHT CARDS — HTML END ===== -->
+
+<div id="panel">
+  <header>
+    <svg width="26" height="30" viewBox="0 0 26 30" aria-hidden="true">
+      <path d="M13 1 C13 1 3 13.5 3 19.5 a10 10 0 0 0 20 0 C23 13.5 13 1 13 1 Z"
+            fill="#00A6C8" stroke="#16324F" stroke-width="1.6"/>
+      <path d="M8.5 20 a4.5 4.5 0 0 0 4.5 4.5" fill="none" stroke="#F7F5EF"
+            stroke-width="1.6" stroke-linecap="round"/>
+    </svg>
+    <h1>Trace a Drop<br /><span>watershed &amp; downstream tracer</span></h1>
+    <span class="ver">vs.11</span>
+  </header>
+
+  <div class="body">
+    <p class="hint">Click anywhere in the continental United States. The drop is
+    routed overland to the nearest stream, its upstream watershed is outlined,
+    and its journey is traced downriver to the sea.</p>
+
+    <div class="search-wrap">
+      <div class="search-row">
+        <input id="searchInput" type="search" placeholder="Search a place or address…"
+               aria-label="Search a place or address" autocomplete="off" />
+        <button id="searchBtn" type="button" aria-label="Search" title="Search">
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+            <circle cx="6.5" cy="6.5" r="4.7" fill="none" stroke="currentColor" stroke-width="1.8"/>
+            <line x1="10.2" y1="10.2" x2="14.4" y2="14.4" stroke="currentColor"
+                  stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+      <ul id="searchResults" role="listbox" aria-label="Search results"></ul>
+    </div>
+
+    <fieldset>
+      <legend>Layers</legend>
+      <label class="layer-row"><input type="checkbox" id="cbBasin" checked />
+        <span class="swatch sw-basin"></span> Highlighted watershed</label>
+      <label class="layer-row"><input type="checkbox" id="cbPath" checked />
+        <span class="swatch sw-path"></span> Path downstream</label>
+      <label class="layer-row"><input type="checkbox" id="cbDrop" checked />
+        <span class="swatch sw-drop"></span> Drop point</label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Basemap</legend>
+      <label class="layer-row"><input type="radio" name="basemapChoice" id="bmTopo" value="topo" checked />
+        USA Topo</label>
+      <label class="layer-row"><input type="radio" name="basemapChoice" id="bmStreets" value="streets" />
+        Streets</label>
+      <label class="layer-row"><input type="radio" name="basemapChoice" id="bmImagery" value="imagery" />
+        Imagery</label>
+    </fieldset>
+
+    <div class="buttons">
+      <button id="btnDim" type="button" aria-pressed="false">View in 3D terrain</button>
+      <button id="btnClear" type="button" class="secondary">Clear map</button>
+    </div>
+
+    <div id="status"><div class="spinner"></div><span id="statusText">Waiting for your first drop.</span></div>
+  </div>
+
+  <div class="credit">Hydrology: USGS NLDI / NHDPlus · Watershed units: USGS WBD · Basemap &amp; 3D terrain: Esri</div>
+</div>
+
+<script>
+require([
+  "esri/config",
+  "esri/Map",
+  "esri/Basemap",
+  "esri/views/MapView",
+  "esri/views/SceneView",
+  "esri/layers/GraphicsLayer",
+  "esri/layers/TileLayer",
+  "esri/Graphic",
+  "esri/geometry/Point",
+  "esri/geometry/Polyline",
+  "esri/geometry/Polygon",
+  "esri/geometry/Extent"
+], function (esriConfig, Map, Basemap, MapView, SceneView, GraphicsLayer, TileLayer, Graphic, Point, Polyline, Polygon, Extent) {
+
+  /* Never show an ArcGIS sign-in dialog. If any service ever demands
+     credentials, the request simply fails and our fallbacks/status line
+     handle it — the user is never prompted to log in. */
+  esriConfig.request.useIdentity = false;
+
+  const NLDI = "https://api.water.usgs.gov/nldi";
+  const WGS84 = { wkid: 4326 };
+
+  /* ---------- global error trap ----------
+     Surfaces any uncaught error or unhandled promise rejection in the
+     status line (and the console) so problems are visible and reportable
+     instead of failing silently. */
+  window.addEventListener("error", (e) => {
+    console.error("Uncaught error:", e.error || e.message);
+    reportError(e.message || (e.error && e.error.message));
+  });
+  window.addEventListener("unhandledrejection", (e) => {
+    console.error("Unhandled rejection:", e.reason);
+    const msg = e.reason && (e.reason.message || String(e.reason));
+    // Esri's goTo/interrupt AbortErrors are routine — don't alarm the user
+    if (e.reason && e.reason.name === "AbortError") return;
+    reportError(msg);
+  });
+  function reportError(msg) {
+    const el = document.getElementById("statusText");
+    if (el) {
+      el.textContent = `Unexpected error: ${msg || "see browser console"}`;
+      document.getElementById("status").className = "error";
+    }
+  }
+
+  /* ---------- layers ---------- */
+  const basinLayer = new GraphicsLayer({ title: "Highlighted watershed" });
+  const pathLayer  = new GraphicsLayer({ title: "Path downstream" });
+  const dropLayer  = new GraphicsLayer({ title: "Drop point" });
+  const hoverLayer = new GraphicsLayer({ title: "Profile position" }); // linked-hover marker
+
+  /* ---------- basemap ----------
+     Primary option: Esri's USA Topo Maps — scanned-style USGS topographic
+     quads served as tiles (key-free, explicit URL). World Hillshade sits
+     underneath so terrain remains visible if zoomed past the deepest topo
+     tiles. Fallback: USGS National Map topo tiles. */
+  const USA_TOPO_URL  = "https://services.arcgisonline.com/ArcGIS/rest/services/USA_Topo_Maps/MapServer";
+  const HILLSHADE_URL = "https://services.arcgisonline.com/arcgis/rest/services/Elevation/World_Hillshade/MapServer";
+  const USGS_TOPO_URL = "https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer";
+
+  const hillshadeLayer = new TileLayer({ url: HILLSHADE_URL, title: "World Hillshade" });
+  const terrainLayer = new TileLayer({ url: USA_TOPO_URL, title: "USA Topo Maps" });
+  const basemap = new Basemap({
+    baseLayers: [hillshadeLayer, terrainLayer],
+    title: "USA Topo"
+  });
+
+  const map = new Map({
+    basemap: basemap,
+    ground: "world-elevation",
+    layers: [basinLayer, pathLayer, dropLayer, hoverLayer]
+  });
+
+  terrainLayer.when(null, () => {
+    // Primary basemap failed — swap in USGS topo tiles and tell the user.
+    setStatus("Esri terrain basemap unavailable — switching to USGS topo tiles.", "error");
+    const usgsTopoLayer = new TileLayer({ url: USGS_TOPO_URL, title: "USGS Topo" });
+    topoBasemap = new Basemap({ baseLayers: [usgsTopoLayer], title: "USGS Topo" });
+    if (document.getElementById("bmTopo").checked) map.basemap = topoBasemap;
+    usgsTopoLayer.when(
+      () => setStatus("Basemap loaded. Click the map to trace a drop."),
+      () => setStatus("No basemap could be loaded. Check the browser console / network tab.", "error")
+    );
+  });
+
+  /* ---------- basemap selector (USA Topo / Streets / Imagery) ----------
+     Streets and Imagery use Esri's World Street Map and World Imagery
+     tile services, loaded the same key-free, explicit-URL way as the
+     topo basemap. Each is built lazily on first selection so no tiles
+     load unless requested. */
+  const ESRI_STREETS_URL = "https://services.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer";
+  const ESRI_IMAGERY_URL = "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer";
+  let topoBasemap = basemap;
+  let streetsBasemap = null;
+  let imageryBasemap = null;
+
+  function lazyBasemap(url, title) {
+    const layer = new TileLayer({ url: url, title: title });
+    layer.when(null, () =>
+      setStatus(`${title} basemap failed to load — try switching back to USA Topo.`, "error"));
+    return new Basemap({ baseLayers: [layer], title: title });
+  }
+
+  document.querySelectorAll('input[name="basemapChoice"]').forEach(radio => {
+    radio.addEventListener("change", () => {
+      if (!radio.checked) return;
+      if (radio.value === "streets") {
+        if (!streetsBasemap) streetsBasemap = lazyBasemap(ESRI_STREETS_URL, "Streets");
+        map.basemap = streetsBasemap;
+      } else if (radio.value === "imagery") {
+        if (!imageryBasemap) imageryBasemap = lazyBasemap(ESRI_IMAGERY_URL, "Imagery");
+        map.basemap = imageryBasemap;
+      } else {
+        map.basemap = topoBasemap;
+      }
+    });
+  });
+
+  /* ---------- views: one shared container, swap between 2D and 3D ----------
+     Pattern from Esri's official "Switch view from 2D to 3D" sample: both
+     views share one Map; only the active view holds the container. Creating
+     a SceneView inside a hidden div (the previous approach) prevents its
+     WebGL canvas from initializing, which is why the 3D view never loaded. */
+  const view2d = new MapView({
+    container: "viewDiv",
+    map: map,
+    center: [-98, 39],
+    zoom: 4,
+    popupEnabled: false
+  });
+
+  let view3d = null;          // created lazily on first switch
+  let activeView = view2d;
+  view2d.on("click", onMapClick);
+
+  // Map control buttons on the right side of the map.
+  // Bottom-right keeps them clear of the floating panel in the top-right.
+  view2d.ui.move("zoom", "bottom-right");
+  attachHoverTooltip(view2d);
+
+  const btnDim = document.getElementById("btnDim");
+  btnDim.addEventListener("click", () => {
+    const goingTo3D = activeView === view2d;
+
+    if (goingTo3D && !view3d) {
+      view3d = new SceneView({ map: map, popupEnabled: false }); // no container yet
+      view3d.ui.move(["zoom", "navigation-toggle", "compass"], "bottom-right");
+      view3d.on("click", onMapClick);
+      attachHoverTooltip(view3d);
+      if (profile.visible) view3d.padding = { bottom: profilePanel.offsetHeight };
+      view3d.when(
+        () => { if (activeView === view3d) setStatus("3D terrain ready — click to trace a drop."); },
+        () => {
+          if (activeView !== view3d) return;
+          setStatus("3D view failed to start (WebGL may be unavailable). Returning to 2D.", "error");
+          view3d.container = null;
+          view2d.container = "viewDiv";
+          activeView = view2d;
+          btnDim.textContent = "View in 3D terrain";
+          btnDim.setAttribute("aria-pressed", "false");
+        }
+      );
+    }
+
+    const show = goingTo3D ? view3d : view2d;
+    const hide = goingTo3D ? view2d : view3d;
+
+    // hand off camera position, then swap the container between views
+    show.viewpoint = hide.viewpoint.clone();
+    hide.container = null;
+    show.container = "viewDiv";
+
+    activeView = show;
+    btnDim.textContent = goingTo3D ? "View in 2D topo" : "View in 3D terrain";
+    btnDim.setAttribute("aria-pressed", String(goingTo3D));
+  });
+
+  /* ---------- symbols ---------- */
+  const dropSymbol = {
+    type: "simple-marker", style: "circle", size: 13,
+    color: [0, 166, 200, 1], outline: { color: [255, 255, 255, 1], width: 2 }
+  };
+  const snapSymbol = {
+    type: "simple-marker", style: "circle", size: 7,
+    color: [15, 107, 215, 1], outline: { color: [255, 255, 255, 1], width: 1.2 }
+  };
+  const raindropLineSymbol = {
+    type: "simple-line", style: "dash", width: 2.4, color: [0, 166, 200, 1]
+  };
+  const streamSymbol = {
+    type: "simple-line", style: "solid", width: 3, color: [15, 107, 215, 0.95],
+    cap: "round", join: "round"
+  };
+  const gapSymbol = {   // dotted bridge where the river leaves U.S. data coverage
+    type: "simple-line", style: "dot", width: 3, color: [15, 107, 215, 0.75],
+    cap: "round"
+  };
+  const basinSymbol = {
+    type: "simple-fill", color: [46, 139, 110, 0.22],
+    outline: { color: [46, 139, 110, 1], width: 2.2 }
+  };
+
+  /* ---------- layer checkboxes ---------- */
+  bindCheckbox("cbBasin", basinLayer);
+  bindCheckbox("cbPath",  pathLayer);
+  bindCheckbox("cbDrop",  dropLayer);
+  function bindCheckbox(id, layer) {
+    document.getElementById(id).addEventListener("change", e => {
+      layer.visible = e.target.checked;
+    });
+  }
+
+  document.getElementById("btnClear").addEventListener("click", () => {
+    clearAll();
+    setStatus("Cleared. Click the map to drop another drop.");
+  });
+  function clearAll() {
+    basinLayer.removeAll(); pathLayer.removeAll(); dropLayer.removeAll();
+    hideTooltip();
+    profileReset();
+    resetDroughtCard();   // DROUGHT CARDS call site
+  }
+
+  /* ---------- place / address search (OpenStreetMap Nominatim geocoder:
+     free, no API key, place names + street addresses, biased to the US) ---------- */
+  const searchInput = document.getElementById("searchInput");
+  const searchBtn = document.getElementById("searchBtn");
+  const searchResults = document.getElementById("searchResults");
+
+  searchBtn.addEventListener("click", runSearch);
+  searchInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); runSearch(); }
+    if (e.key === "Escape") closeResults();
+  });
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".search-wrap")) closeResults();
+  });
+
+  async function runSearch() {
+    const q = searchInput.value.trim();
+    if (!q) return;
+    setStatus(`Searching for “${q}”…`, "busy");
+    closeResults();
+    try {
+      const params = new URLSearchParams({
+        q: q, format: "jsonv2", limit: "6",
+        countrycodes: "us", addressdetails: "0"
+      });
+      const results = await getJSON(`https://nominatim.openstreetmap.org/search?${params}`);
+      setStatus(results.length ? "Pick a result, then click the map to trace a drop."
+                               : "No places found. Try a different name or add a state.",
+                results.length ? "" : "error");
+      renderResults(results);
+    } catch (err) {
+      setStatus("The place search service didn't respond. Try again in a moment.", "error");
+    }
+  }
+
+  function renderResults(results) {
+    searchResults.innerHTML = "";
+    if (!results.length) {
+      const li = document.createElement("li");
+      li.className = "none";
+      li.textContent = "No matches found";
+      searchResults.appendChild(li);
+    } else {
+      results.forEach((r) => {
+        const li = document.createElement("li");
+        li.setAttribute("role", "option");
+        li.tabIndex = 0;
+        li.textContent = r.display_name;
+        const go = () => { zoomToResult(r); closeResults(); };
+        li.addEventListener("click", go);
+        li.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
+        searchResults.appendChild(li);
+      });
+    }
+    searchResults.style.display = "block";
+  }
+  function closeResults() { searchResults.style.display = "none"; }
+
+  function zoomToResult(r) {
+    // Nominatim boundingbox is [south, north, west, east] as strings
+    const bb = (r.boundingbox || []).map(Number);
+    const lat = Number(r.lat), lon = Number(r.lon);
+    let target;
+    if (bb.length === 4 && (bb[1] - bb[0] > 0.002 || bb[3] - bb[2] > 0.002)) {
+      target = new Extent({
+        ymin: bb[0], ymax: bb[1], xmin: bb[2], xmax: bb[3],
+        spatialReference: WGS84
+      }).expand(1.3);
+    } else {
+      // a single address or small feature — center on it at street level
+      target = { target: new Point({ longitude: lon, latitude: lat, spatialReference: WGS84 }), zoom: 15 };
+    }
+    activeView.goTo(target, { duration: 900 }).catch(() => {});
+    setStatus(`Moved to ${shortName(r.display_name)}. Click the map to trace a drop.`);
+  }
+  function shortName(name) {
+    const parts = String(name).split(",");
+    return parts.slice(0, 2).join(",").trim();
+  }
+
+  /* ---------- status helpers ---------- */
+  const statusBox = document.getElementById("status");
+  const statusText = document.getElementById("statusText");
+  function setStatus(msg, mode) {
+    statusText.textContent = msg;
+    statusBox.className = mode === "busy" ? "busy" : (mode === "error" ? "error" : "");
+  }
+
+  /* ---------- HUC lookup (USGS Watershed Boundary Dataset) ----------
+     hydro.nationalmap.gov/arcgis/rest/services/wbd/MapServer
+     layer 6 = 12-digit HU (subwatershed), layer 4 = 8-digit HU (subbasin) */
+  const WBD = "https://hydro.nationalmap.gov/arcgis/rest/services/wbd/MapServer";
+  async function queryHUC(layerId, hucField, lon, lat) {
+    const params = new URLSearchParams({
+      geometry: `${lon},${lat}`,
+      geometryType: "esriGeometryPoint",
+      inSR: "4326",
+      spatialRel: "esriSpatialRelIntersects",
+      outFields: `${hucField},name`,
+      returnGeometry: "false",
+      f: "json"
+    });
+    const data = await getJSON(`${WBD}/${layerId}/query?${params}`);
+    const attrs = data && data.features && data.features[0] && data.features[0].attributes;
+    return attrs ? { huc: attrs[hucField], name: attrs.name } : null;
+  }
+  async function lookupHucInfo(lon, lat) {
+    const [h12, h8] = await Promise.allSettled([
+      queryHUC(6, "huc12", lon, lat),   // subwatershed
+      queryHUC(4, "huc8",  lon, lat)    // subbasin
+    ]);
+    return {
+      huc12: h12.status === "fulfilled" ? h12.value : null,
+      huc8:  h8.status  === "fulfilled" ? h8.value  : null
+    };
+  }
+
+  /* ---------- hover tooltip over the highlighted watershed ---------- */
+  const tooltip = document.getElementById("tooltip");
+  function tooltipHTML(a) {
+    if (!a) return "";
+    if (!a.huc12 && !a.huc8) {
+      return a.pending
+        ? `<div class="t-dim">Looking up hydrologic unit…</div>`
+        : `<div class="t-dim">Hydrologic unit unavailable</div>`;
+    }
+    let html = "";
+    if (a.huc12) {
+      html += `<div class="t-title">${escapeHTML(a.huc12.name || "Unnamed subwatershed")}</div>` +
+              `<div>HUC12 <span class="t-huc">${escapeHTML(a.huc12.huc || "")}</span></div>`;
+    }
+    if (a.huc8) {
+      html += `<div class="t-dim">Subbasin: ${escapeHTML(a.huc8.name || "—")} ` +
+              `· HUC8 <span class="t-huc">${escapeHTML(a.huc8.huc || "")}</span></div>`;
+    }
+    return html;
+  }
+  function escapeHTML(s) {
+    return String(s).replace(/[&<>"']/g,
+      c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+  function showTooltip(x, y, attrs) {
+    tooltip.innerHTML = tooltipHTML(attrs);
+    tooltip.style.display = "block";
+    const pad = 14;
+    const r = tooltip.getBoundingClientRect();
+    let left = x + pad, top = y + pad;
+    if (left + r.width > window.innerWidth - 8)  left = x - r.width - pad;
+    if (top + r.height > window.innerHeight - 8) top = y - r.height - pad;
+    tooltip.style.left = `${Math.max(8, left)}px`;
+    tooltip.style.top  = `${Math.max(8, top)}px`;
+  }
+  function hideTooltip() { tooltip.style.display = "none"; }
+
+  function attachHoverTooltip(view) {
+    let hitTestBusy = false;
+    view.on("pointer-move", (event) => {
+      const basinActive = basinLayer.visible && basinLayer.graphics.length > 0;
+      const pathActive  = profile.visible && profile.samples &&
+                          pathLayer.visible && profile.pathGraphic;
+      if (!basinActive && !pathActive) { hideTooltip(); hidePosition(); return; }
+      if (hitTestBusy) return;   // skip frames while a hit test is in flight
+      hitTestBusy = true;
+      view.hitTest(event, { include: [basinLayer, pathLayer] }).then((response) => {
+        hitTestBusy = false;
+        const results = response.results || [];
+        const pathHit = pathActive && results.find(r => r.graphic === profile.pathGraphic);
+        const basinHit = basinActive && results.find(
+          r => r.graphic && r.graphic.layer === basinLayer);
+
+        if (pathHit) {
+          // hovering the downstream line: sync the elevation profile crosshair
+          const mp = view.toMap(event);
+          if (mp && mp.latitude != null) {
+            const idx = nearestSampleIndex(normalizeLon(mp.longitude), mp.latitude);
+            view.container.style.cursor = "pointer";
+            hideTooltip();
+            showPositionAt(idx);
+            return;
+          }
+        }
+        hidePosition();
+        if (basinHit) {
+          view.container.style.cursor = "pointer";
+          showTooltip(event.x, event.y, basinHit.graphic.attributes);
+        } else {
+          view.container.style.cursor = "";
+          hideTooltip();
+        }
+      }).catch(() => { hitTestBusy = false; });
+    });
+    view.on("pointer-leave", () => {
+      view.container.style.cursor = ""; hideTooltip(); hidePosition();
+    });
+  }
+
+  /* =====================================================================
+     ELEVATION PROFILE of the downstream path
+     Elevations sampled from the same Esri world-elevation service that
+     powers the 3D terrain (map.ground.queryElevation). Hover is linked
+     both ways: map line -> chart crosshair, chart -> map marker.
+     ===================================================================== */
+  const profilePanel = document.getElementById("profilePanel");
+  const ppChart  = document.getElementById("ppChart");
+  const ppStats  = document.getElementById("ppStats");
+  const ppLabel  = document.getElementById("ppLabel");
+  const ppClose  = document.getElementById("ppClose");
+  const ppReopen = document.getElementById("ppReopen");
+
+  const N_SAMPLES = 240;
+  const profile = {
+    samples: null,     // [{lon, lat, dKm, zM}]
+    totalKm: 0,
+    pathGraphic: null, // the bold blue downstream graphic
+    visible: false,
+    X: null, Y: null   // chart scale functions (set by renderChart)
+  };
+  let hoverGraphic = null;
+  const hoverSymbol = {
+    type: "simple-marker", style: "circle", size: 11,
+    color: [255, 140, 0, 1], outline: { color: [255, 255, 255, 1], width: 2 }
+  };
+
+  ppClose.addEventListener("click", hideProfilePanel);
+  ppReopen.addEventListener("click", showProfilePanel);
+  window.addEventListener("resize", () => {
+    if (profile.visible && profile.samples) renderChart();
+  });
+
+  // chart -> map: move crosshair + map marker as the cursor sweeps the chart
+  ppChart.addEventListener("pointermove", (e) => {
+    if (!profile.samples || !profile.X) return;
+    const rect = ppChart.getBoundingClientRect();
+    const frac = clamp((e.clientX - rect.left - profile.padL) /
+                       (rect.width - profile.padL - profile.padR), 0, 1);
+    showPositionAt(Math.round(frac * (profile.samples.length - 1)));
+  });
+  ppChart.addEventListener("pointerleave", hidePosition);
+
+  function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
+
+  function haversineKm(a, b) {
+    const R = 6371, rad = Math.PI / 180;
+    const dLat = (b[1] - a[1]) * rad, dLon = (b[0] - a[0]) * rad;
+    const s = Math.sin(dLat / 2) ** 2 +
+              Math.cos(a[1] * rad) * Math.cos(b[1] * rad) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(s));
+  }
+
+  async function buildProfile(pathGraphic, myId) {
+    profileReset();
+    // 1 — flatten the flowline paths into one vertex list (skip duplicate joins)
+    const verts = [];
+    pathGraphic.geometry.paths.forEach(p => p.forEach(c => {
+      const last = verts[verts.length - 1];
+      if (!last || last[0] !== c[0] || last[1] !== c[1]) verts.push([c[0], c[1]]);
+    }));
+    if (verts.length < 2) return;
+
+    // 2 — cumulative distance, then resample to evenly spaced points
+    const cum = [0];
+    for (let i = 1; i < verts.length; i++) cum.push(cum[i - 1] + haversineKm(verts[i - 1], verts[i]));
+    const total = cum[cum.length - 1];
+    if (!(total > 0)) return;
+    const pts = [];
+    let j = 0;
+    for (let i = 0; i < N_SAMPLES; i++) {
+      const target = total * i / (N_SAMPLES - 1);
+      while (j < cum.length - 2 && cum[j + 1] < target) j++;
+      const seg = (cum[j + 1] - cum[j]) || 1e-9;
+      const t = (target - cum[j]) / seg;
+      pts.push([verts[j][0] + (verts[j + 1][0] - verts[j][0]) * t,
+                verts[j][1] + (verts[j + 1][1] - verts[j][1]) * t,
+                target]);
+    }
+
+    // 3 — sample elevations from the world-elevation ground service
+    let zGeom;
+    try {
+      const line = new Polyline({
+        paths: [pts.map(p => [p[0], p[1]])], spatialReference: WGS84
+      });
+      const res = await map.ground.queryElevation(line, { demResolution: "auto" });
+      zGeom = res.geometry;
+    } catch (e) {
+      ppStats.textContent = "";
+      ppChart.innerHTML =
+        `<div style="padding:24px 12px;font-size:13px;color:#6b7f93;">
+           Elevation service unavailable — profile could not be built.</div>`;
+      showProfilePanel(true);
+      return;
+    }
+    if (myId !== requestId) return;
+
+    const zp = zGeom.paths[0];
+    profile.samples = pts.map((p, i) => ({
+      lon: p[0], lat: p[1], dKm: p[2],
+      zM: (zp[i] && zp[i].length > 2) ? zp[i][2] : 0
+    }));
+    profile.totalKm = total;
+    profile.pathGraphic = pathGraphic;
+
+    const mi = (total * 0.621371).toFixed(0);
+    const startFt = Math.round(profile.samples[0].zM * 3.28084).toLocaleString();
+    const endFt = Math.round(profile.samples[profile.samples.length - 1].zM * 3.28084).toLocaleString();
+    ppStats.textContent = `${mi} mi · starts at ${startFt} ft · ends at ${endFt} ft`;
+    showProfilePanel();
+  }
+
+  function renderChart() {
+    if (!profile.samples) return;
+    const w = ppChart.clientWidth, h = ppChart.clientHeight;
+    if (w < 60 || h < 60) return;
+    const padL = 56, padR = 14, padT = 10, padB = 20;
+    profile.padL = padL; profile.padR = padR;
+    const s = profile.samples, total = profile.totalKm;
+    let lo = Infinity, hi = -Infinity;
+    s.forEach(p => { lo = Math.min(lo, p.zM); hi = Math.max(hi, p.zM); });
+    const span = (hi - lo) || 1;
+    const loP = lo - span * 0.06, hiP = hi + span * 0.06;
+    const X = d => padL + (d / total) * (w - padL - padR);
+    const Y = z => padT + (1 - (z - loP) / (hiP - loP)) * (h - padT - padB);
+    profile.X = X; profile.Y = Y;
+    profile.chartTop = padT; profile.chartBottom = h - padB;
+
+    let d = "";
+    s.forEach((p, i) => { d += (i ? "L" : "M") + X(p.dKm).toFixed(1) + " " + Y(p.zM).toFixed(1) + " "; });
+    const area = d + `L${X(total).toFixed(1)} ${h - padB} L${X(0).toFixed(1)} ${h - padB} Z`;
+    const ft = z => Math.round(z * 3.28084).toLocaleString();
+    const mi = k => (k * 0.621371).toFixed(0);
+
+    ppChart.innerHTML =
+      `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg">
+        <defs><linearGradient id="ppGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#0F6BD7" stop-opacity="0.35"/>
+          <stop offset="1" stop-color="#0F6BD7" stop-opacity="0.04"/>
+        </linearGradient></defs>
+        <line x1="${padL}" y1="${h - padB}" x2="${w - padR}" y2="${h - padB}" stroke="#D8D3C4"/>
+        <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${h - padB}" stroke="#D8D3C4"/>
+        <path d="${area}" fill="url(#ppGrad)"/>
+        <path d="${d}" fill="none" stroke="#0F6BD7" stroke-width="2.2"
+              stroke-linejoin="round" stroke-linecap="round"/>
+        <text x="${padL - 7}" y="${Y(hi) + 4}" text-anchor="end" font-size="11" fill="#3d5570">${ft(hi)} ft</text>
+        <text x="${padL - 7}" y="${Y(lo) + 4}" text-anchor="end" font-size="11" fill="#3d5570">${ft(lo)} ft</text>
+        <text x="${padL}" y="${h - 5}" font-size="11" fill="#3d5570">0 mi</text>
+        <text x="${w - padR}" y="${h - 5}" text-anchor="end" font-size="11" fill="#3d5570">${mi(total)} mi</text>
+        <g id="ppCross" style="display:none">
+          <line id="ppCrossLine" y1="${padT}" y2="${h - padB}" stroke="#16324F"
+                stroke-width="1" stroke-dasharray="3 3"/>
+          <circle id="ppCrossDot" r="4.5" fill="#FF8C00" stroke="#fff" stroke-width="2"/>
+        </g>
+      </svg>`;
+  }
+
+  function nearestSampleIndex(lon, lat) {
+    const cs = Math.cos(lat * Math.PI / 180);
+    let best = 0, bd = Infinity;
+    profile.samples.forEach((p, i) => {
+      const dx = (p.lon - lon) * cs, dy = p.lat - lat;
+      const dd = dx * dx + dy * dy;
+      if (dd < bd) { bd = dd; best = i; }
+    });
+    return best;
+  }
+
+  function showPositionAt(idx) {
+    if (!profile.samples || !profile.X) return;
+    const p = profile.samples[clamp(idx, 0, profile.samples.length - 1)];
+    // chart crosshair
+    const cross = document.getElementById("ppCross");
+    if (cross) {
+      const x = profile.X(p.dKm), y = profile.Y(p.zM);
+      const cl = document.getElementById("ppCrossLine");
+      cl.setAttribute("x1", x); cl.setAttribute("x2", x);
+      const cd = document.getElementById("ppCrossDot");
+      cd.setAttribute("cx", x); cd.setAttribute("cy", y);
+      cross.style.display = "block";
+      // floating readout above the dot
+      ppLabel.textContent =
+        `${(p.dKm * 0.621371).toFixed(1)} mi · ${Math.round(p.zM * 3.28084).toLocaleString()} ft`;
+      ppLabel.style.display = "block";
+      const panelRect = profilePanel.getBoundingClientRect();
+      const chartRect = ppChart.getBoundingClientRect();
+      const lblW = ppLabel.offsetWidth;
+      let left = chartRect.left - panelRect.left + x - lblW / 2;
+      left = clamp(left, 6, panelRect.width - lblW - 6);
+      ppLabel.style.left = `${left}px`;
+      ppLabel.style.top = `${chartRect.top - panelRect.top + y - 32}px`;
+    }
+    // map marker
+    const pt = new Point({ longitude: p.lon, latitude: p.lat, spatialReference: WGS84 });
+    if (!hoverGraphic) {
+      hoverGraphic = new Graphic({ geometry: pt, symbol: hoverSymbol });
+      hoverLayer.add(hoverGraphic);
+    } else {
+      hoverGraphic.geometry = pt;
+    }
+  }
+
+  function hidePosition() {
+    const cross = document.getElementById("ppCross");
+    if (cross) cross.style.display = "none";
+    ppLabel.style.display = "none";
+    if (hoverGraphic) { hoverLayer.removeAll(); hoverGraphic = null; }
+  }
+
+  function setViewsPadding(px) {
+    view2d.padding = { bottom: px };
+    if (view3d) view3d.padding = { bottom: px };
+  }
+  function showProfilePanel(errorOnly) {
+    profilePanel.style.display = "block";
+    profile.visible = true;
+    ppReopen.style.display = "none";
+    setViewsPadding(profilePanel.offsetHeight);
+    if (!errorOnly && profile.samples) renderChart();
+  }
+  function hideProfilePanel() {
+    profilePanel.style.display = "none";
+    profile.visible = false;
+    setViewsPadding(0);
+    hidePosition();
+    if (profile.samples) ppReopen.style.display = "block";
+  }
+  function profileReset() {
+    hidePosition();
+    profile.samples = null; profile.pathGraphic = null;
+    profile.X = null; profile.Y = null; profile.totalKm = 0;
+    profilePanel.style.display = "none"; profile.visible = false;
+    ppReopen.style.display = "none";
+    ppChart.innerHTML = ""; ppStats.textContent = "";
+    setViewsPadding(0);
+  }
+
+  /* =====================================================================
+     DROUGHT CARDS (removable feature) — JS BEGIN
+     "Watershed conditions" card: current U.S. Drought Monitor breakdown
+     for the HUC8 subbasin + live streamflow from the first active USGS
+     gauge downstream. To remove this feature entirely: delete this block,
+     the matching CSS/HTML blocks, and the three call sites marked
+     "DROUGHT CARDS" in onMapClick and clearAll.
+     ===================================================================== */
+  const droughtCard = document.getElementById("droughtCard");
+  const dcDrought = document.getElementById("dcDrought");
+  const dcFlow = document.getElementById("dcFlow");
+  document.getElementById("dcClose").addEventListener("click", () => {
+    droughtCard.style.display = "none";
+  });
+
+  function showDroughtCard() {
+    dcDrought.innerHTML = `<span class="dc-dim">Loading U.S. Drought Monitor…</span>`;
+    dcFlow.innerHTML = `<span class="dc-dim">Finding a stream gauge…</span>`;
+    droughtCard.style.display = "block";
+  }
+  function resetDroughtCard() {
+    droughtCard.style.display = "none";
+    dcDrought.innerHTML = dcFlow.innerHTML = `<span class="dc-dim">Waiting for a trace…</span>`;
+  }
+
+  const USDM_LABELS = {
+    D0: "Abnormally Dry", D1: "Moderate Drought", D2: "Severe Drought",
+    D3: "Extreme Drought", D4: "Exceptional Drought"
+  };
+  const USDM_COLORS = {
+    None: "#CBD9C3", D0: "#FFFF00", D1: "#FCD37F",
+    D2: "#FFAA00", D3: "#E60000", D4: "#730000"
+  };
+  const usdmDate = d => `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
+
+  async function updateDrought(huc8, myId) {
+    if (!huc8 || !huc8.huc) {
+      dcDrought.innerHTML = `<span class="dc-dim">No HUC found — drought data unavailable here.</span>`;
+      return;
+    }
+    try {
+      const end = new Date(), start = new Date(Date.now() - 35 * 864e5);
+      const url = "https://usdmdataservices.unl.edu/api/HUCStatistics/" +
+        "GetDroughtSeverityStatisticsByAreaPercent" +
+        `?aoi=${huc8.huc}&startdate=${usdmDate(start)}&enddate=${usdmDate(end)}` +
+        `&statisticsType=2&hucLevel=8`;
+      const r = await fetch(url, { headers: { Accept: "application/json" } });
+      if (!r.ok) throw new Error("USDM " + r.status);
+      const rows = await r.json();
+      if (myId !== requestId) return;
+      if (!Array.isArray(rows) || !rows.length) throw new Error("empty");
+
+      // newest week first (MapDate is yyyymmdd; ValidStart is ISO — both sort as strings)
+      const key = row => {
+        const m = String(row.MapDate || "").match(/^(\d{8})$/);
+        return m ? m[1] : String(row.ValidStart || "");
+      };
+      rows.sort((a, b) => (key(a) < key(b) ? 1 : -1));
+      const wk = rows[0];
+      const pct = k => Math.max(0, parseFloat(wk[k]) || 0);
+
+      let bar = "", worst = null, inDrought = 0;
+      ["None", "D0", "D1", "D2", "D3", "D4"].forEach(k => {
+        const v = pct(k);
+        if (k !== "None" && v > 0.5) worst = k;
+        if (k !== "None" && k !== "D0") inDrought += v;
+        if (v > 0) bar += `<span style="width:${v}%;background:${USDM_COLORS[k]}" title="${k}: ${v.toFixed(0)}%"></span>`;
+      });
+
+      const md = String(wk.MapDate || "").match(/^(\d{4})(\d{2})(\d{2})$/);
+      const weekOf = md ? ` (week of ${Number(md[2])}/${Number(md[3])}/${md[1]})` : "";
+      let summary;
+      if (inDrought >= 0.5) {
+        summary = `<strong>${inDrought.toFixed(0)}%</strong> of the ${escapeHTML(huc8.name || "subbasin")} ` +
+                  `subbasin is in drought` +
+                  (worst && worst !== "D0" ? ` — worst: ${USDM_LABELS[worst]} (${worst})` : "") + `.`;
+      } else if (pct("D0") >= 0.5) {
+        summary = `No drought, but ${pct("D0").toFixed(0)}% of the subbasin is Abnormally Dry (D0).`;
+      } else {
+        summary = `No drought in the ${escapeHTML(huc8.name || "subbasin")} subbasin right now.`;
+      }
+      dcDrought.innerHTML =
+        `<div class="dc-bar">${bar}</div>${summary}` +
+        `<span class="dc-dim">${weekOf ? weekOf.trim() : ""}</span>`;
+    } catch (e) {
+      if (myId !== requestId) return;
+      dcDrought.innerHTML = `<span class="dc-dim">U.S. Drought Monitor data unavailable right now.</span>`;
+    }
+  }
+
+  async function updateFlow(comid, myId) {
+    try {
+      const sites = await getJSON(`${NLDI}/linked-data/comid/${comid}/navigation/DM/nwissite?distance=9999`);
+      if (myId !== requestId) return;
+      const feats = (sites.features || []).slice(0, 5);
+      if (!feats.length) throw new Error("no sites");
+      for (const f of feats) {
+        const siteId = String(f.properties.identifier || "").replace(/^USGS-/, "");
+        if (!siteId) continue;
+        try {
+          const nw = await getJSON(
+            `https://waterservices.usgs.gov/nwis/iv/?format=json&sites=${siteId}&parameterCd=00060&siteStatus=active`);
+          if (myId !== requestId) return;
+          const ts = nw.value && nw.value.timeSeries && nw.value.timeSeries[0];
+          const v = ts && ts.values && ts.values[0] && ts.values[0].value && ts.values[0].value[0];
+          const cfs = v ? parseFloat(v.value) : NaN;
+          if (!isFinite(cfs) || cfs <= -999990) continue;  // gauge offline / ice-affected
+          const name = ts.sourceInfo && ts.sourceInfo.siteName
+            ? escapeHTML(ts.sourceInfo.siteName) : `USGS ${siteId}`;
+          dcFlow.innerHTML =
+            `<div class="dc-flow-val">${cfs.toLocaleString()} <small>cfs</small></div>` +
+            `${name}<br /><span class="dc-dim">first active gauge downstream of your drop</span>`;
+          return;
+        } catch (inner) { /* try the next gauge downstream */ }
+      }
+      throw new Error("no data");
+    } catch (e) {
+      if (myId !== requestId) return;
+      dcFlow.innerHTML = `<span class="dc-dim">No active streamflow gauge found downstream.</span>`;
+    }
+  }
+  /* ===== DROUGHT CARDS — JS END ===== */
+
+  /* ---------- GeoJSON -> ArcGIS geometry helpers ---------- */
+  function linesFromGeoJSON(geom) {
+    // returns array of paths ([[x,y],...]) from LineString / MultiLineString
+    if (!geom) return [];
+    if (geom.type === "LineString") return [geom.coordinates.map(c => [c[0], c[1]])];
+    if (geom.type === "MultiLineString") return geom.coordinates.map(p => p.map(c => [c[0], c[1]]));
+    return [];
+  }
+  function polygonFromGeoJSON(geom) {
+    if (!geom) return null;
+    let rings = [];
+    if (geom.type === "Polygon") rings = geom.coordinates;
+    else if (geom.type === "MultiPolygon") geom.coordinates.forEach(p => rings.push(...p));
+    if (!rings.length) return null;
+    return new Polygon({ rings: rings, spatialReference: WGS84 });
+  }
+
+  /* ---------- main click handler ---------- */
+  let requestId = 0;
+  async function onMapClick(event) {
+    const pt = activeView.toMap(event) || event.mapPoint;
+    if (!pt) return;
+    const lon = normalizeLon(pt.longitude != null ? pt.longitude : pt.x);
+    const lat = pt.latitude != null ? pt.latitude : pt.y;
+    const myId = ++requestId;
+
+    clearAll();
+    const dropPoint = new Point({ longitude: lon, latitude: lat, spatialReference: WGS84 });
+    dropLayer.add(new Graphic({ geometry: dropPoint, symbol: dropSymbol }));
+    setStatus("Finding the nearest stream…", "busy");
+
+    try {
+      /* 1 — snap to the nearest NHD flowline to get its COMID */
+      const posUrl = `${NLDI}/linked-data/comid/position?coords=${encodeURIComponent(`POINT(${lon} ${lat})`)}`;
+      const pos = await getJSON(posUrl);
+      if (myId !== requestId) return;
+      const feat = pos && pos.features && pos.features[0];
+      if (!feat || !feat.properties || !feat.properties.comid) {
+        throw new UserError("No stream network found here. Try a spot inside the continental U.S.");
+      }
+      const comid = feat.properties.comid;
+
+      let snapPoint = null;
+      if (feat.geometry && feat.geometry.type === "Point") {
+        snapPoint = new Point({
+          longitude: feat.geometry.coordinates[0],
+          latitude:  feat.geometry.coordinates[1],
+          spatialReference: WGS84
+        });
+      }
+
+      /* 2 — overland raindrop trace from the drop to the stream (best effort) */
+      setStatus("Tracing the drop overland to the stream…", "busy");
+      let gotRaindrop = false;
+      try {
+        const ft = await postJSON(`${NLDI}/pygeoapi/processes/nldi-flowtrace/execution`, {
+          inputs: { lat: lat, lon: lon, raindroptrace: true, direction: "down" }
+        });
+        if (myId !== requestId) return;
+        const feats = (ft && ft.features) || [];
+        const raindropPaths = [];
+        feats.forEach(f => {
+          raindropPaths.push(...linesFromGeoJSON(f.geometry));
+          if (f.geometry && f.geometry.type === "Point" &&
+              f.properties && /intersection/i.test(f.properties.identifier || "")) {
+            snapPoint = new Point({
+              longitude: f.geometry.coordinates[0],
+              latitude:  f.geometry.coordinates[1],
+              spatialReference: WGS84
+            });
+          }
+        });
+        if (raindropPaths.length) {
+          /* The service starts its trace at the nearest DEM cell, which can
+             sit a short distance from the exact click. Snap the trace's
+             starting end to the dropped point so, at any zoom level, the
+             line begins precisely under the dot. */
+          let bp = 0, be = 0, bd = Infinity;  // best path, best end (0=first,1=last), best dist
+          raindropPaths.forEach((p, i) => {
+            [p[0], p[p.length - 1]].forEach((c, e) => {
+              const dd = (c[0] - lon) ** 2 + (c[1] - lat) ** 2;
+              if (dd < bd) { bd = dd; bp = i; be = e; }
+            });
+          });
+          if (be === 0) raindropPaths[bp].unshift([lon, lat]);
+          else          raindropPaths[bp].push([lon, lat]);
+
+          pathLayer.add(new Graphic({
+            geometry: new Polyline({ paths: raindropPaths, spatialReference: WGS84 }),
+            symbol: raindropLineSymbol
+          }));
+          gotRaindrop = true;
+        }
+      } catch (e) { /* raindrop service is best-effort */ }
+
+      let connectorDrawn = gotRaindrop;
+      if (!gotRaindrop && snapPoint) {
+        // fallback: dashed straight segment from the drop to the snapped stream point
+        pathLayer.add(new Graphic({
+          geometry: new Polyline({
+            paths: [[[lon, lat], [snapPoint.longitude, snapPoint.latitude]]],
+            spatialReference: WGS84
+          }),
+          symbol: raindropLineSymbol
+        }));
+        connectorDrawn = true;
+      }
+      if (snapPoint) dropLayer.add(new Graphic({ geometry: snapPoint, symbol: snapSymbol }));
+
+      /* 3 — watershed (upstream basin) + 4 — downstream main-stem trace, in parallel */
+      setStatus("Delineating watershed and tracing downstream…", "busy");
+
+      // One HUC lookup, shared by the watershed tooltip and the drought card
+      const qLon = snapPoint ? snapPoint.longitude : lon;
+      const qLat = snapPoint ? snapPoint.latitude  : lat;
+      const hucPromise = lookupHucInfo(qLon, qLat);
+
+      const [basinRes, dmRes] = await Promise.allSettled([
+        getJSON(`${NLDI}/linked-data/comid/${comid}/basin?simplified=true`),
+        getJSON(`${NLDI}/linked-data/comid/${comid}/navigation/DM/flowlines?distance=9999`)
+      ]);
+      if (myId !== requestId) return;
+
+      let basinGraphic = null;
+      if (basinRes.status === "fulfilled" && basinRes.value && basinRes.value.features) {
+        const bf = basinRes.value.features[0];
+        const poly = bf && polygonFromGeoJSON(bf.geometry);
+        if (poly) {
+          basinGraphic = new Graphic({
+            geometry: poly, symbol: basinSymbol,
+            attributes: { pending: true, huc12: null, huc8: null }
+          });
+          basinLayer.add(basinGraphic);
+
+          // Hover-popup attributes fill in when the HUC lookup lands
+          hucPromise.then(info => {
+            if (myId !== requestId) return;
+            basinGraphic.attributes = { pending: false, huc12: info.huc12, huc8: info.huc8 };
+            if (tooltip.style.display === "block") {
+              tooltip.innerHTML = tooltipHTML(basinGraphic.attributes);
+            }
+          }).catch(() => {
+            if (myId !== requestId) return;
+            basinGraphic.attributes = { pending: false, huc12: null, huc8: null };
+          });
+        }
+      }
+
+      let pathGraphic = null;
+      if (dmRes.status === "fulfilled" && dmRes.value && dmRes.value.features) {
+        const allPaths = [];
+        dmRes.value.features.forEach(f => allPaths.push(...linesFromGeoJSON(f.geometry)));
+
+        /* If we never got a snapped entry point from the services, derive one:
+           the flowline vertex nearest the click. Guarantees the trim below and
+           the connector always have an anchor. */
+        if (!snapPoint && allPaths.length) {
+          let bd = Infinity, best = null;
+          allPaths.forEach(p => p.forEach(c => {
+            const dd = (c[0] - lon) ** 2 + (c[1] - lat) ** 2;
+            if (dd < bd) { bd = dd; best = c; }
+          }));
+          if (best) {
+            snapPoint = new Point({
+              longitude: best[0], latitude: best[1], spatialReference: WGS84
+            });
+            dropLayer.add(new Graphic({ geometry: snapPoint, symbol: snapSymbol }));
+          }
+        }
+
+        /* The first flowline returned is the ENTIRE headwater reach the drop
+           snaps into — including its portion upstream of the entry point.
+           Trim everything upstream of the vertex nearest the snapped entry
+           point, and start the line exactly at that entry point, so the
+           blue trace begins where the drop actually joins the stream. */
+        if (allPaths.length && snapPoint) {
+          const sx = snapPoint.longitude, sy = snapPoint.latitude;
+          let bp = -1, bv = 0, bd = Infinity;
+          allPaths.forEach((p, i) => p.forEach((c, vi) => {
+            const dd = (c[0] - sx) ** 2 + (c[1] - sy) ** 2;
+            if (dd < bd) { bd = dd; bp = i; bv = vi; }
+          }));
+          if (bp >= 0) {
+            const trimmed = allPaths[bp].slice(bv);
+            trimmed.unshift([sx, sy]);
+            allPaths[bp] = trimmed;
+          }
+        }
+
+        if (allPaths.length) {
+          /* Where the river crosses out of U.S. data coverage (e.g. the
+             Pend Oreille/Columbia loop through British Columbia), NHDPlus
+             has no flowlines, leaving a hole in the trace. Detect any
+             break between consecutive flowlines and bridge it with a
+             dotted connector so the path reads as continuous. */
+          const gapPaths = [];
+          for (let i = 0; i < allPaths.length - 1; i++) {
+            const a = allPaths[i][allPaths[i].length - 1];
+            const b = allPaths[i + 1][0];
+            if (haversineKm(a, b) > 0.2) gapPaths.push([a, b]);
+          }
+          if (gapPaths.length) {
+            pathLayer.add(new Graphic({
+              geometry: new Polyline({ paths: gapPaths, spatialReference: WGS84 }),
+              symbol: gapSymbol
+            }));
+          }
+
+          pathGraphic = new Graphic({
+            geometry: new Polyline({ paths: allPaths, spatialReference: WGS84 }),
+            symbol: streamSymbol
+          });
+          pathLayer.add(pathGraphic);
+        }
+
+        /* Last line of defense: if no overland connector was drawn earlier
+           (raindrop service AND snap lookup both came back empty), draw the
+           straight dashed segment now so the dot and trace always connect. */
+        if (!connectorDrawn && snapPoint && pathGraphic) {
+          pathLayer.add(new Graphic({
+            geometry: new Polyline({
+              paths: [[[lon, lat], [snapPoint.longitude, snapPoint.latitude]]],
+              spatialReference: WGS84
+            }),
+            symbol: raindropLineSymbol
+          }));
+          connectorDrawn = true;
+        }
+      }
+
+      if (!basinGraphic && !pathGraphic) {
+        throw new UserError("The hydrology services returned no results for this spot.");
+      }
+
+      /* zoom to everything we drew */
+      const targets = [basinGraphic, pathGraphic].filter(Boolean);
+      activeView.goTo(targets.length ? targets : dropPoint, { duration: 900 }).catch(() => {});
+
+      /* build the elevation profile for the downstream path (background) */
+      if (pathGraphic) buildProfile(pathGraphic, myId);
+
+      /* DROUGHT CARDS: show current watershed conditions (removable feature) */
+      showDroughtCard();
+      updateFlow(comid, myId);
+      hucPromise.then(info => updateDrought(info.huc8, myId))
+                .catch(() => updateDrought(null, myId));
+
+      const miles = pathGraphic ? "traced to its terminal outlet" : "downstream trace unavailable";
+      setStatus(`Done — watershed highlighted; drop ${miles}.`);
+    } catch (err) {
+      if (myId !== requestId) return;
+      setStatus(err instanceof UserError ? err.message :
+        "Something went wrong reaching the USGS hydrology services. Try again in a moment.",
+        "error");
+    }
+  }
+
+  function normalizeLon(lon) {
+    while (lon > 180) lon -= 360;
+    while (lon < -180) lon += 360;
+    return lon;
+  }
+
+  /* ---------- fetch helpers ---------- */
+  class UserError extends Error {}
+  async function getJSON(url) {
+    const r = await fetch(url, { headers: { "Accept": "application/json" } });
+    if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
+    return r.json();
+  }
+  async function postJSON(url, body) {
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
+    return r.json();
+  }
+});
+</script>
+</body>
+</html>
