@@ -220,7 +220,7 @@
             stroke-width="1.6" stroke-linecap="round"/>
     </svg>
     <h1>Trace a Drop<br /><span>watershed &amp; downstream tracer</span></h1>
-    <span class="ver">vs.9</span>
+    <span class="ver">vs.10</span>
   </header>
 
   <div class="body">
@@ -468,6 +468,10 @@ require([
   const streamSymbol = {
     type: "simple-line", style: "solid", width: 3, color: [15, 107, 215, 0.95],
     cap: "round", join: "round"
+  };
+  const gapSymbol = {   // dotted bridge where the river leaves U.S. data coverage
+    type: "simple-line", style: "dot", width: 3, color: [15, 107, 215, 0.75],
+    cap: "round"
   };
   const basinSymbol = {
     type: "simple-fill", color: [46, 139, 110, 0.22],
@@ -1116,6 +1120,24 @@ require([
         }
 
         if (allPaths.length) {
+          /* Where the river crosses out of U.S. data coverage (e.g. the
+             Pend Oreille/Columbia loop through British Columbia), NHDPlus
+             has no flowlines, leaving a hole in the trace. Detect any
+             break between consecutive flowlines and bridge it with a
+             dotted connector so the path reads as continuous. */
+          const gapPaths = [];
+          for (let i = 0; i < allPaths.length - 1; i++) {
+            const a = allPaths[i][allPaths[i].length - 1];
+            const b = allPaths[i + 1][0];
+            if (haversineKm(a, b) > 0.2) gapPaths.push([a, b]);
+          }
+          if (gapPaths.length) {
+            pathLayer.add(new Graphic({
+              geometry: new Polyline({ paths: gapPaths, spatialReference: WGS84 }),
+              symbol: gapSymbol
+            }));
+          }
+
           pathGraphic = new Graphic({
             geometry: new Polyline({ paths: allPaths, spatialReference: WGS84 }),
             symbol: streamSymbol
