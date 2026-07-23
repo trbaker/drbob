@@ -226,6 +226,11 @@
   }
   .dc-bar span { height: 100%; display: block; }
   .dc-dim { color: #6b7f93; }
+  .dc-chip {
+    display: inline-block; padding: 2px 8px; margin: 0 4px 2px 0;
+    border-radius: 5px; border: 1px solid var(--line);
+    font-size: 11px; font-weight: 600;
+  }
   .dc-flow-val {
     font-family: "Bitter", serif; font-weight: 800; font-size: 19px;
     color: var(--stream); line-height: 1.2;
@@ -278,7 +283,7 @@
             stroke-width="1.6" stroke-linecap="round"/>
     </svg>
     <h1>Trace a Drop<br /><span>watershed &amp; downstream tracer</span></h1>
-    <span class="ver">vs.11</span>
+    <span class="ver">vs.12</span>
   </header>
 
   <div class="body">
@@ -1017,64 +1022,96 @@ require([
   }
 
   const USDM_LABELS = {
-    D0: "Abnormally Dry", D1: "Moderate Drought", D2: "Severe Drought",
-    D3: "Extreme Drought", D4: "Exceptional Drought"
+    0: "Abnormally Dry (D0)", 1: "Moderate Drought (D1)", 2: "Severe Drought (D2)",
+    3: "Extreme Drought (D3)", 4: "Exceptional Drought (D4)"
   };
-  const USDM_COLORS = {
-    None: "#CBD9C3", D0: "#FFFF00", D1: "#FCD37F",
-    D2: "#FFAA00", D3: "#E60000", D4: "#730000"
-  };
-  const usdmDate = d => `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
+  const USDM_COLORS = ["#FFFF00", "#FCD37F", "#FFAA00", "#E60000", "#730000"];
 
-  async function updateDrought(huc8, myId) {
-    if (!huc8 || !huc8.huc) {
-      dcDrought.innerHTML = `<span class="dc-dim">No HUC found — drought data unavailable here.</span>`;
-      return;
+  /* NDMC's ArcGIS-hosted current USDM polygons (CORS-enabled; the
+     usdmdataservices.unl.edu REST API blocks browser requests).
+     Polygons are cumulative: a point in D2 also intersects D0 and D1. */
+  const USDM_FS = "https://services5.arcgis.com/0OTVzJS4K09zlixn/arcgis/rest/services/USDM_current/FeatureServer/0/query";
+
+  async function usdmQuery(params) {
+    const r = await fetch(USDM_FS, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(params)
+    });
+    if (!r.ok) throw new Error("USDM " + r.status);
+    const j = await r.json();
+    if (j.error) throw new Error("USDM query error");
+    return j;
+  }
+  function dmVal(attrs) {
+    for (const k in attrs) {
+      if (/^dm$/i.test(k)) {
+        const v = parseInt(attrs[k], 10);
+        if (isFinite(v)) return v;
+      }
     }
+    return null;
+  }
+
+  async function updateDrought(lon, lat, basinGeom, myId) {
     try {
-      const end = new Date(), start = new Date(Date.now() - 35 * 864e5);
-      const url = "https://usdmdataservices.unl.edu/api/HUCStatistics/" +
-        "GetDroughtSeverityStatisticsByAreaPercent" +
-        `?aoi=${huc8.huc}&startdate=${usdmDate(start)}&enddate=${usdmDate(end)}` +
-        `&statisticsType=2&hucLevel=8`;
-      const r = await fetch(url, { headers: { Accept: "application/json" } });
-      if (!r.ok) throw new Error("USDM " + r.status);
-      const rows = await r.json();
+      /* category at the drop point */
+      const ptJ = await usdmQuery({
+        f: "json", where: "1=1",
+        geometry: `${lon},${lat}`, geometryType: "esriGeometryPoint", inSR: "4326",
+        spatialRel: "esriSpatialRelIntersects", outFields: "*", returnGeometry: "false"
+      });
       if (myId !== requestId) return;
-      if (!Array.isArray(rows) || !rows.length) throw new Error("empty");
-
-      // newest week first (MapDate is yyyymmdd; ValidStart is ISO — both sort as strings)
-      const key = row => {
-        const m = String(row.MapDate || "").match(/^(\d{8})$/);
-        return m ? m[1] : String(row.ValidStart || "");
-      };
-      rows.sort((a, b) => (key(a) < key(b) ? 1 : -1));
-      const wk = rows[0];
-      const pct = k => Math.max(0, parseFloat(wk[k]) || 0);
-
-      let bar = "", worst = null, inDrought = 0;
-      ["None", "D0", "D1", "D2", "D3", "D4"].forEach(k => {
-        const v = pct(k);
-        if (k !== "None" && v > 0.5) worst = k;
-        if (k !== "None" && k !== "D0") inDrought += v;
-        if (v > 0) bar += `<span style="width:${v}%;background:${USDM_COLORS[k]}" title="${k}: ${v.toFixed(0)}%"></span>`;
+      let ptWorst = null;
+      (ptJ.features || []).forEach(f => {
+        const v = dmVal(f.attributes);
+        if (v != null) ptWorst = ptWorst == null ? v : Math.max(ptWorst, v);
       });
 
-      const md = String(wk.MapDate || "").match(/^(\d{4})(\d{2})(\d{2})$/);
-      const weekOf = md ? ` (week of ${Number(md[2])}/${Number(md[3])}/${md[1]})` : "";
-      let summary;
-      if (inDrought >= 0.5) {
-        summary = `<strong>${inDrought.toFixed(0)}%</strong> of the ${escapeHTML(huc8.name || "subbasin")} ` +
-                  `subbasin is in drought` +
-                  (worst && worst !== "D0" ? ` — worst: ${USDM_LABELS[worst]} (${worst})` : "") + `.`;
-      } else if (pct("D0") >= 0.5) {
-        summary = `No drought, but ${pct("D0").toFixed(0)}% of the subbasin is Abnormally Dry (D0).`;
+      /* categories present anywhere in the highlighted watershed */
+      const present = new Set();
+      let basinWorst = null;
+      if (basinGeom) {
+        try {
+          const bJ = await usdmQuery({
+            f: "json", where: "1=1",
+            geometry: JSON.stringify(basinGeom.toJSON()),
+            geometryType: "esriGeometryPolygon", inSR: "4326",
+            spatialRel: "esriSpatialRelIntersects", outFields: "*", returnGeometry: "false"
+          });
+          if (myId !== requestId) return;
+          (bJ.features || []).forEach(f => {
+            const v = dmVal(f.attributes);
+            if (v != null) {
+              present.add(v);
+              basinWorst = basinWorst == null ? v : Math.max(basinWorst, v);
+            }
+          });
+        } catch (e) { /* watershed query is best-effort; point result still shows */ }
+      }
+
+      const chips = [0, 1, 2, 3, 4].map(v => {
+        const on = present.has(v) || v === ptWorst;
+        return `<span class="dc-chip" style="` +
+          `background:${on ? USDM_COLORS[v] : "#EFECE3"};` +
+          `color:${on && v >= 3 ? "#fff" : "#3d5570"};opacity:${on ? 1 : 0.5}">D${v}</span>`;
+      }).join("");
+
+      let text;
+      if (ptWorst == null && basinWorst == null) {
+        text = "No drought — this watershed is currently drought-free.";
       } else {
-        summary = `No drought in the ${escapeHTML(huc8.name || "subbasin")} subbasin right now.`;
+        text = ptWorst == null
+          ? "Your drop point is drought-free"
+          : `Your drop point: <strong>${USDM_LABELS[ptWorst]}</strong>`;
+        if (basinWorst != null && basinWorst !== ptWorst) {
+          text += `; worst in the watershed: <strong>${USDM_LABELS[basinWorst]}</strong>`;
+        }
+        text += ".";
       }
       dcDrought.innerHTML =
-        `<div class="dc-bar">${bar}</div>${summary}` +
-        `<span class="dc-dim">${weekOf ? weekOf.trim() : ""}</span>`;
+        `<div style="margin:2px 0 6px">${chips}</div>${text}` +
+        `<br /><span class="dc-dim">U.S. Drought Monitor, updated weekly</span>`;
     } catch (e) {
       if (myId !== requestId) return;
       dcDrought.innerHTML = `<span class="dc-dim">U.S. Drought Monitor data unavailable right now.</span>`;
@@ -1358,8 +1395,7 @@ require([
       /* DROUGHT CARDS: show current watershed conditions (removable feature) */
       showDroughtCard();
       updateFlow(comid, myId);
-      hucPromise.then(info => updateDrought(info.huc8, myId))
-                .catch(() => updateDrought(null, myId));
+      updateDrought(lon, lat, basinGraphic ? basinGraphic.geometry : null, myId);
 
       const miles = pathGraphic ? "traced to its terminal outlet" : "downstream trace unavailable";
       setStatus(`Done — watershed highlighted; drop ${miles}.`);
